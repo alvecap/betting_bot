@@ -390,11 +390,11 @@ CONFIANCE: [pourcentage]"""
 async def scheduler():
     while True:
         # Heure actuelle en Afrique centrale (UTC+1)
-        africa_central_time = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
+        africa_central_time = pytz.timezone("Africa/Brazzaville")  # Fuseau horaire de Brazzaville (UTC+1)
         now = datetime.now(africa_central_time)
 
         # Vérifier si c'est 18h05
-        if now.hour == 18 and now.minute == 25:  # Déclenchement à 18h25
+        if now.hour == 18 and now.minute == 35:  # Déclenchement à 18h35
             print(f"Exécution du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
             config = Config(
                 TELEGRAM_BOT_TOKEN="votre_token_telegram",
