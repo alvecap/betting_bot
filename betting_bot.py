@@ -393,8 +393,8 @@ async def scheduler():
         africa_central_time = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
         now = datetime.now(africa_central_time)
 
-        # Vérifier si c'est 7h00
-        if now.hour == 7 and now.minute == 0:
+        # Vérifier si c'est 18h05
+        if now.hour == 18 and now.minute == 5:
             print(f"Exécution du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
             config = Config(
                 TELEGRAM_BOT_TOKEN="votre_token_telegram",
