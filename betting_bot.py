@@ -394,7 +394,7 @@ async def scheduler():
         now = datetime.now(africa_central_time)
 
         # Vérifier si c'est 18h05
-        if now.hour == 18 and now.minute == 5:
+        if now.hour == 16 and now.minute == 10:
             print(f"Exécution du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
             config = Config(
                 TELEGRAM_BOT_TOKEN="votre_token_telegram",
