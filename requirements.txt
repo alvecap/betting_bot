@@ -1,0 +1,6 @@
+requests
+anthropic
+python-telegram-bot
+nest-asyncio
+pytz
+retry
