@@ -10,12 +10,13 @@ from dataclasses import dataclass
 import re
 import sys
 from retry import retry
-import pytz  # Pour gérer les fuseaux horaires
+import pytz
+import os  # Pour les variables d'environnement
 
 # Configuration de base
 nest_asyncio.apply()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', 
-                   handlers=[logging.StreamHandler(sys.stdout)])
+                   handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler("betting_bot.log")])
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -26,6 +27,9 @@ class Config:
     PERPLEXITY_API_KEY: str
     CLAUDE_API_KEY: str
     MAX_MATCHES: int = 5
+    TIMEZONE: str = "Africa/Brazzaville"  # Fuseau horaire par défaut (UTC+1)
+    EXECUTION_HOUR: int = 18
+    EXECUTION_MINUTE: int = 35
 
 @dataclass
 class Match:
@@ -54,6 +58,7 @@ class BettingBot:
         self.config = config
         self.bot = telegram.Bot(token=config.TELEGRAM_BOT_TOKEN)
         self.claude_client = anthropic.Anthropic(api_key=config.CLAUDE_API_KEY)
+        self.timezone = pytz.timezone(config.TIMEZONE)
         self.available_predictions = [
             "1X", "X2", "12", 
             "+1.5 buts", "+2.5 buts", "-3.5 buts",
@@ -72,7 +77,7 @@ class BettingBot:
             "Championnat des Pays-Bas de Football 🇳🇱": 2,
             "Championnat du Portugal de Football 🇵🇹": 2
         }
-        print("Bot initialisé!")
+        logger.info(f"Bot initialisé avec fuseau horaire: {config.TIMEZONE}")
 
     def _get_league_name(self, competition: str) -> str:
         league_mappings = {
@@ -91,7 +96,7 @@ class BettingBot:
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def fetch_matches(self) -> List[Match]:
-        print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
+        logger.info("1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
             "apiKey": self.config.ODDS_API_KEY,
@@ -105,8 +110,9 @@ class BettingBot:
             response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
             matches_data = response.json()
-            print(f"✅ {len(matches_data)} matchs récupérés")
+            logger.info(f"✅ {len(matches_data)} matchs récupérés")
 
+            # Utiliser UTC pour comparer avec les données de l'API
             current_time = datetime.now(timezone.utc)
             matches = []
 
@@ -127,26 +133,27 @@ class BettingBot:
                     ))
 
             if not matches:
+                logger.warning("Aucun match trouvé pour les prochaines 24 heures")
                 return []
 
             # Trier les matchs par priorité et heure de début
             matches.sort(key=lambda x: (-x.priority, x.commence_time))
             
-            # Prendre les 5 meilleurs matchs
+            # Prendre les meilleurs matchs
             top_matches = matches[:self.config.MAX_MATCHES]
             
-            print(f"\n✅ {len(top_matches)} meilleurs matchs sélectionnés")
+            logger.info(f"✅ {len(top_matches)} meilleurs matchs sélectionnés")
             for match in top_matches:
-                print(f"- {match.home_team} vs {match.away_team} ({match.competition})")
+                logger.info(f"- {match.home_team} vs {match.away_team} ({match.competition})")
                 
             return top_matches
 
         except Exception as e:
-            print(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
+            logger.error(f"❌ Erreur lors de la récupération des matchs: {str(e)}", exc_info=True)
             return []
 
     def get_match_stats(self, match: Match) -> Optional[str]:
-        print(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
+        logger.info(f"2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
@@ -192,14 +199,14 @@ class BettingBot:
             )
             response.raise_for_status()
             stats = response.json()["choices"][0]["message"]["content"]
-            print("✅ Statistiques récupérées")
+            logger.info("✅ Statistiques récupérées")
             return stats
         except Exception as e:
-            print(f"❌ Erreur lors de la récupération des statistiques: {str(e)}")
+            logger.error(f"❌ Erreur lors de la récupération des statistiques: {str(e)}", exc_info=True)
             return None
 
     def get_predicted_score(self, match: Match) -> str:
-        print(f"\n3️⃣ OBTENTION DU SCORE EXACT PROBABLE POUR {match.home_team} vs {match.away_team}")
+        logger.info(f"3️⃣ OBTENTION DU SCORE EXACT PROBABLE POUR {match.home_team} vs {match.away_team}")
         try:
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
@@ -223,25 +230,25 @@ Recherche les prédictions d'experts et les sites spécialisés. Réponds unique
             
             # Vérifier que le format est correct (X-Y)
             if re.match(r'^\d+-\d+$', predicted_score):
-                print(f"✅ Score probable obtenu: {predicted_score}")
+                logger.info(f"✅ Score probable obtenu: {predicted_score}")
                 return predicted_score
             else:
                 # Tenter d'extraire un format de score s'il est inclus dans une phrase
                 score_match = re.search(r'(\d+)\s*-\s*(\d+)', predicted_score)
                 if score_match:
                     clean_score = f"{score_match.group(1)}-{score_match.group(2)}"
-                    print(f"✅ Score probable extrait: {clean_score}")
+                    logger.info(f"✅ Score probable extrait: {clean_score}")
                     return clean_score
                 else:
-                    print("❌ Format de score invalide, utilisation d'un score par défaut")
+                    logger.warning("❌ Format de score invalide, utilisation d'un score par défaut")
                     return "1-1"  # Score par défaut
                 
         except Exception as e:
-            print(f"❌ Erreur lors de l'obtention du score probable: {str(e)}")
+            logger.error(f"❌ Erreur lors de l'obtention du score probable: {str(e)}", exc_info=True)
             return "1-1"  # Score par défaut en cas d'erreur
 
     def analyze_match(self, match: Match, stats: str) -> Optional[Prediction]:
-        print(f"\n4️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
+        logger.info(f"4️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
         
         try:
             prompt = f"""ANALYSE APPROFONDIE: {match.home_team} vs {match.away_team}
@@ -285,27 +292,31 @@ CONFIANCE: [pourcentage]"""
                             pred = available_pred
                             break
                             
-                    print(f"✅ Prédiction: {pred} (Confiance: {conf}%)")
+                    logger.info(f"✅ Prédiction: {pred} (Confiance: {conf}%)")
+                    
+                    # Convertir l'heure dans le fuseau horaire local
+                    local_time = match.commence_time.astimezone(self.timezone)
+                    
                     return Prediction(
                         region=match.region,
                         competition=match.competition,
                         match=f"{match.home_team} vs {match.away_team}",
-                        time=match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M"),
+                        time=local_time.strftime("%H:%M"),
                         predicted_score=match.predicted_score,
                         prediction=pred,
                         confidence=conf
                     )
 
-            print("❌ Pas de prédiction fiable")
+            logger.warning("❌ Pas de prédiction fiable")
             return None
 
         except Exception as e:
-            print(f"❌ Erreur lors de l'analyse avec Claude: {str(e)}")
+            logger.error(f"❌ Erreur lors de l'analyse avec Claude: {str(e)}", exc_info=True)
             return None
 
     def _format_predictions_message(self, predictions: List[Prediction]) -> str:
         # Date du jour formatée
-        current_date = datetime.now().strftime('%d/%m/%Y')
+        current_date = datetime.now(self.timezone).strftime('%d/%m/%Y')
         
         # En-tête du message avec formatage en gras
         msg = f"*🤖 AL VE AI BOT - PRÉDICTIONS DU {current_date} 🤖*\n\n"
@@ -334,10 +345,10 @@ CONFIANCE: [pourcentage]"""
 
     async def send_predictions(self, predictions: List[Prediction]) -> None:
         if not predictions:
-            print("❌ Aucune prédiction à envoyer")
+            logger.warning("❌ Aucune prédiction à envoyer")
             return
 
-        print("\n5️⃣ ENVOI DES PRÉDICTIONS")
+        logger.info("5️⃣ ENVOI DES PRÉDICTIONS")
         
         try:
             message = self._format_predictions_message(predictions)
@@ -349,17 +360,29 @@ CONFIANCE: [pourcentage]"""
                 parse_mode="Markdown",  # Activer le formatage Markdown
                 disable_web_page_preview=True
             )
-            print("✅ Prédictions envoyées!")
+            logger.info("✅ Prédictions envoyées!")
             
         except Exception as e:
-            print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
+            logger.error(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}", exc_info=True)
 
     async def run(self) -> None:
         try:
-            print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
+            current_time = datetime.now(self.timezone)
+            logger.info(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({current_time.strftime('%H:%M')}) ===")
+            
+            # Envoyer un message test pour vérifier que le bot fonctionne
+            try:
+                await self.bot.send_message(
+                    chat_id=self.config.TELEGRAM_CHAT_ID,
+                    text=f"🔄 Début de l'exécution du bot à {current_time.strftime('%H:%M')} (fuseau horaire: {self.config.TIMEZONE})"
+                )
+                logger.info("✅ Message de test envoyé")
+            except Exception as e:
+                logger.error(f"❌ Erreur lors de l'envoi du message de test: {str(e)}", exc_info=True)
+            
             matches = self.fetch_matches()
             if not matches:
-                print("❌ Aucun match trouvé pour aujourd'hui")
+                logger.warning("❌ Aucun match trouvé pour aujourd'hui")
                 return
 
             predictions = []
@@ -380,38 +403,96 @@ CONFIANCE: [pourcentage]"""
             if predictions:
                 # Envoyer les prédictions une seule fois
                 await self.send_predictions(predictions)
-                print("=== ✅ EXÉCUTION TERMINÉE ===")
+                logger.info("=== ✅ EXÉCUTION TERMINÉE ===")
             else:
-                print("❌ Aucune prédiction fiable n'a pu être générée")
+                logger.warning("❌ Aucune prédiction fiable n'a pu être générée")
+                # Envoyer un message d'erreur
+                await self.bot.send_message(
+                    chat_id=self.config.TELEGRAM_CHAT_ID,
+                    text="❌ Aucune prédiction fiable n'a pu être générée pour aujourd'hui."
+                )
 
         except Exception as e:
-            print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
+            logger.error(f"❌ ERREUR GÉNÉRALE: {str(e)}", exc_info=True)
+            # Tenter d'envoyer un message d'erreur
+            try:
+                await self.bot.send_message(
+                    chat_id=self.config.TELEGRAM_CHAT_ID,
+                    text=f"❌ Une erreur s'est produite lors de l'exécution du bot: {str(e)}"
+                )
+            except:
+                pass
 
 async def scheduler():
+    # Charger la configuration depuis les variables d'environnement
+    config = Config(
+        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
+        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
+        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
+        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
+        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
+        TIMEZONE=os.environ.get("TIMEZONE", "Africa/Brazzaville"),
+        EXECUTION_HOUR=int(os.environ.get("EXECUTION_HOUR", "09")),
+        EXECUTION_MINUTE=int(os.environ.get("EXECUTION_MINUTE", "35"))
+    )
+    
+    # Valider les clés API
+    if not all([config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID, config.ODDS_API_KEY, 
+                config.PERPLEXITY_API_KEY, config.CLAUDE_API_KEY]):
+        logger.error("❌ Configuration incomplète: certaines clés API sont manquantes")
+        return
+    
+    timezone = pytz.timezone(config.TIMEZONE)
+    logger.info(f"Scheduler démarré. Exécution prévue à {config.EXECUTION_HOUR}:{config.EXECUTION_MINUTE:02d} ({config.TIMEZONE})")
+    
+    # Exécuter le bot immédiatement au démarrage pour tester
+    logger.info("Exécution initiale de test...")
+    bot = BettingBot(config)
+    await bot.run()
+    
     while True:
-        # Heure actuelle en Afrique centrale (UTC+1)
-        africa_central_time = pytz.timezone("Africa/Brazzaville")  # Fuseau horaire de Brazzaville (UTC+1)
-        now = datetime.now(africa_central_time)
+        # Heure actuelle dans le fuseau horaire spécifié
+        now = datetime.now(timezone)
+        
+        # Calculer l'heure dans le fuseau horaire UTC
+        now_utc = datetime.now(pytz.UTC)
+        
+        # Log détaillé des heures
+        if now.minute % 10 == 0:  # Log toutes les 10 minutes
+            logger.info(f"Heure actuelle: {now.strftime('%Y-%m-%d %H:%M:%S')} ({config.TIMEZONE})")
+            logger.info(f"Heure UTC: {now_utc.strftime('%Y-%m-%d %H:%M:%S')} (UTC)")
+            logger.info(f"Prochaine exécution à: {config.EXECUTION_HOUR}:{config.EXECUTION_MINUTE:02d} ({config.TIMEZONE})")
 
-        # Vérifier si c'est 18h05
-        if now.hour == 18 and now.minute == 35:  # Déclenchement à 18h35
-            print(f"Exécution du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            config = Config(
-                TELEGRAM_BOT_TOKEN="votre_token_telegram",
-                TELEGRAM_CHAT_ID="votre_chat_id",
-                ODDS_API_KEY="votre_cle_odds",
-                PERPLEXITY_API_KEY="votre_cle_perplexity",
-                CLAUDE_API_KEY="votre_cle_claude",
-                MAX_MATCHES=5
-            )
+        # Vérifier si c'est l'heure d'exécution
+        if now.hour == config.EXECUTION_HOUR and now.minute == config.EXECUTION_MINUTE:
+            logger.info(f"⏰ Déclenchement du bot à {now.strftime('%Y-%m-%d %H:%M:%S')} ({config.TIMEZONE})")
             bot = BettingBot(config)
             await bot.run()
 
             # Attendre 1 minute pour éviter les exécutions multiples
             await asyncio.sleep(60)
+        
+        # Attendre 30 secondes avant de vérifier à nouveau
+        await asyncio.sleep(30)
 
-        # Attendre 1 minute avant de vérifier à nouveau
-        await asyncio.sleep(60)
+async def main():
+    # Mode test: exécution immédiate une seule fois
+    if os.environ.get("TEST_MODE") == "1":
+        logger.info("Mode test activé: exécution immédiate")
+        config = Config(
+            TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+            TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
+            ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
+            PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
+            CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
+            MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5"))
+        )
+        bot = BettingBot(config)
+        await bot.run()
+    else:
+        # Mode normal: scheduler
+        await scheduler()
 
 if __name__ == "__main__":
-    asyncio.run(scheduler())
+    asyncio.run(main())
