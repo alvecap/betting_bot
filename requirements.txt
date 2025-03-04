@@ -4,3 +4,5 @@ python-telegram-bot
 nest-asyncio
 pytz
 retry
+tenacity
+
