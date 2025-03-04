@@ -486,13 +486,16 @@ async def main():
     if os.environ.get("TEST_MODE") == "1":
         logger.info("Mode test activé: exécution immédiate")
         config = Config(
-            TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
-            TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
-            ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
-            PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
-            CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
-            MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5"))
-        )
+    TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+    TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
+    ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
+    PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
+    CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
+    MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
+    TIMEZONE=os.environ.get("TIMEZONE", "Africa/Brazzaville"),
+    EXECUTION_HOUR=int(os.environ.get("EXECUTION_HOUR", "11")),
+    EXECUTION_MINUTE=int(os.environ.get("EXECUTION_MINUTE", "55"))
+)
         bot = BettingBot(config)
         await bot.run()
     else:
