@@ -140,7 +140,7 @@ class BettingBot:
             matches.sort(key=lambda x: (-x.priority, x.commence_time))
             
             # Prendre les meilleurs matchs
-            top_matches = matches[:self.config.MAX_MATCHES]
+            top_matches = matches[:self.config.MAX_MATCHES * 2]  # Prendre plus de matchs pour avoir des backups
             
             logger.info(f"✅ {len(top_matches)} meilleurs matchs sélectionnés")
             for match in top_matches:
@@ -152,6 +152,7 @@ class BettingBot:
             logger.error(f"❌ Erreur lors de la récupération des matchs: {str(e)}", exc_info=True)
             return []
 
+    @retry(tries=3, delay=5, backoff=2, logger=logger)
     def get_match_stats(self, match: Match) -> Optional[str]:
         logger.info(f"2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
@@ -195,7 +196,7 @@ class BettingBot:
                     "max_tokens": 800,
                     "temperature": 0.2
                 },
-                timeout=20
+                timeout=30  # Augmenter le timeout à 30 secondes
             )
             response.raise_for_status()
             stats = response.json()["choices"][0]["message"]["content"]
@@ -205,6 +206,7 @@ class BettingBot:
             logger.error(f"❌ Erreur lors de la récupération des statistiques: {str(e)}", exc_info=True)
             return None
 
+    @retry(tries=3, delay=5, backoff=2, logger=logger)
     def get_predicted_score(self, match: Match) -> str:
         logger.info(f"3️⃣ OBTENTION DU SCORE EXACT PROBABLE POUR {match.home_team} vs {match.away_team}")
         try:
@@ -223,7 +225,7 @@ Recherche les prédictions d'experts et les sites spécialisés. Réponds unique
                     "max_tokens": 50,
                     "temperature": 0.1
                 },
-                timeout=15
+                timeout=20
             )
             response.raise_for_status()
             predicted_score = response.json()["choices"][0]["message"]["content"].strip()
@@ -397,6 +399,10 @@ CONFIANCE: [pourcentage]"""
                     if prediction:
                         predictions.append(prediction)
                         
+                # Si nous avons déjà 5 prédictions, nous pouvons arrêter
+                if len(predictions) >= self.config.MAX_MATCHES:
+                    break
+                        
                 # Attendre un peu entre chaque analyse pour ne pas surcharger les API
                 await asyncio.sleep(2)
 
@@ -435,7 +441,6 @@ async def scheduler():
         TIMEZONE=os.environ.get("TIMEZONE", "Africa/Brazzaville"),
         EXECUTION_HOUR=int(os.environ.get("EXECUTION_HOUR", "09")),
         EXECUTION_MINUTE=int(os.environ.get("EXECUTION_MINUTE", "35"))
-    )
     
     # Valider les clés API
     if not all([config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID, config.ODDS_API_KEY, 
