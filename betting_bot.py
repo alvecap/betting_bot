@@ -362,17 +362,16 @@ RÈGLES DE VÉRIFICATION OBLIGATOIRES:
 - Pour prédire une victoire à domicile "1", l'équipe à domicile doit avoir une cote MAXIMALE de 1.50
 - Pour prédire une victoire à l'extérieur "2", l'équipe extérieure doit avoir une cote MAXIMALE de 1.50
 - Si la cote est supérieure à 1.50, NE PAS prédire de victoire directe; préférer double chance (1X ou X2)
-- Pour prédire "+1.5 buts", la moyenne de buts dans les matchs récents des deux équipes doit être d'au moins 2
-- Pour prédire "+2.5 buts", la moyenne de buts doit être d'au moins 2.5
-- Pour prédire "-3.5 buts", l'historique doit montrer qu'au moins 80% des matchs récents ont vu moins de 4 buts
+- Pour prédire "+1.5 buts", on doit être sûr à 90% que le match aura AU MOINS 3 BUTS
+- Pour prédire "+2.5 buts", on doit être sûr à 90% que le match aura AU MOINS 4 BUTS
+- Pour prédire "-3.5 buts", la probabilité doit être d'au moins 80% que le match aura moins de 4 buts
 - Ne jamais donner de prédiction sans une confiance d'au moins 80%
 - Le match nul "X" n'est PAS une option de prédiction acceptable
 - Privilégier les prédictions avec les statistiques les plus solides
 
 FORMAT REQUIS:
 PREDICTION: [une option de la liste]
-CONFIANCE: [pourcentage]
-JUSTIFICATION: [explication brève de la prédiction basée sur les données]"""
+CONFIANCE: [pourcentage]"""
 
             message = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -384,12 +383,10 @@ JUSTIFICATION: [explication brève de la prédiction basée sur les données]"""
             response = message.content[0].text
             prediction = re.search(r"PREDICTION:\s*(.*)", response)
             confidence = re.search(r"CONFIANCE:\s*(\d+)", response)
-            justification = re.search(r"JUSTIFICATION:\s*(.*?)(?=\n|$)", response, re.DOTALL)
 
             if all([prediction, confidence]):
                 pred = prediction.group(1).strip()
                 conf = min(100, max(80, int(confidence.group(1))))
-                just = justification.group(1).strip() if justification else "Basé sur l'analyse des données et scores prédits"
                 
                 if any(p.lower() in pred.lower() for p in self.available_predictions):
                     # Trouver la prédiction exacte dans la liste
@@ -412,7 +409,6 @@ JUSTIFICATION: [explication brève de la prédiction basée sur les données]"""
                         return None
                     
                     print(f"✅ Prédiction finale: {pred} (Confiance: {conf}%)")
-                    print(f"✅ Justification: {just}")
                     
                     return Prediction(
                         region=match.region,
@@ -451,7 +447,7 @@ JUSTIFICATION: [explication brève de la prédiction basée sur les données]"""
                 f"🏆 _{pred.competition}_\n"
                 f"*⚔️ {pred.match}* {odds_info}\n"
                 f"⏰ Coup d'envoi : _{pred.time}_\n"
-                f"🔮 Scores prédits : *{pred.predicted_score1}* et *{pred.predicted_score2}*\n"
+                f"🔮 Scores prédits : *{pred.predicted_score1}* ou *{pred.predicted_score2}*\n"
                 f"📈 Prédiction : *{pred.prediction}*\n"
                 f"✅ Confiance : *{pred.confidence}%*\n\n"
                 f"{'─' * 20}\n\n"
