@@ -66,7 +66,7 @@ class BettingBot:
         self.available_predictions = [
             "1X", "X2", "12", 
             "+1.5 buts", "+2.5 buts", "-3.5 buts",
-            "1", "X", "2",
+            "1", "2",  # Suppression du match nul comme prédiction
             "-1.5 buts 1ère mi-temps", 
             "+0.5 but 1ère mi-temps", "+0.5 but 2ème mi-temps"
         ]
@@ -359,12 +359,14 @@ CONSIGNES STRICTES:
 4. Choisir la prédiction LA PLUS SÛRE parmi: {', '.join(self.available_predictions)}
 
 RÈGLES DE VÉRIFICATION OBLIGATOIRES:
-- Pour prédire une victoire directe ("1" ou "2"), l'équipe doit être clairement supérieure (différence de niveau significative) ET avoir une forme récente excellente
-- Si la cote d'une équipe est supérieure à 2.00, ne pas prédire sa victoire directe; préférer double chance (1X ou X2)
+- Pour prédire une victoire à domicile "1", l'équipe à domicile doit avoir une cote MAXIMALE de 1.50
+- Pour prédire une victoire à l'extérieur "2", l'équipe extérieure doit avoir une cote MAXIMALE de 1.50
+- Si la cote est supérieure à 1.50, NE PAS prédire de victoire directe; préférer double chance (1X ou X2)
 - Pour prédire "+1.5 buts", la moyenne de buts dans les matchs récents des deux équipes doit être d'au moins 2
 - Pour prédire "+2.5 buts", la moyenne de buts doit être d'au moins 2.5
 - Pour prédire "-3.5 buts", l'historique doit montrer qu'au moins 80% des matchs récents ont vu moins de 4 buts
 - Ne jamais donner de prédiction sans une confiance d'au moins 80%
+- Le match nul "X" n'est PAS une option de prédiction acceptable
 - Privilégier les prédictions avec les statistiques les plus solides
 
 FORMAT REQUIS:
@@ -395,20 +397,22 @@ JUSTIFICATION: [explication brève de la prédiction basée sur les données]"""
                         if available_pred.lower() in pred.lower():
                             pred = available_pred
                             break
-                            
-                    print(f"✅ Prédiction: {pred} (Confiance: {conf}%)")
-                    print(f"✅ Justification: {just}")
                     
                     # Vérifications supplémentaires pour la fiabilité
-                    if pred == "1" and match.home_odds > 2.0:
-                        print("⚠️ Cote trop élevée pour prédire une victoire domicile directe. Prédiction rejetée.")
+                    # Appliquer les règles strictes pour les victoires directes
+                    if pred == "1" and match.home_odds > 1.50:
+                        print(f"⚠️ Cote domicile trop élevée ({match.home_odds} > 1.50). Conversion en 1X.")
+                        pred = "1X"
+                    elif pred == "2" and match.away_odds > 1.50:
+                        print(f"⚠️ Cote extérieur trop élevée ({match.away_odds} > 1.50). Conversion en X2.")
+                        pred = "X2"
+                    
+                    if pred == "X":
+                        print("⚠️ Prédiction de match nul non autorisée. Prédiction rejetée.")
                         return None
-                    elif pred == "2" and match.away_odds > 2.0:
-                        print("⚠️ Cote trop élevée pour prédire une victoire extérieure directe. Prédiction rejetée.")
-                        return None
-                    elif conf < 80:
-                        print("⚠️ Confiance insuffisante. Prédiction rejetée.")
-                        return None
+                    
+                    print(f"✅ Prédiction finale: {pred} (Confiance: {conf}%)")
+                    print(f"✅ Justification: {just}")
                     
                     return Prediction(
                         region=match.region,
