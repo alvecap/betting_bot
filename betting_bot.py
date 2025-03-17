@@ -40,6 +40,9 @@ class Match:
     priority: int = 0
     predicted_score1: str = ""
     predicted_score2: str = ""
+    home_odds: float = 0.0
+    draw_odds: float = 0.0
+    away_odds: float = 0.0
 
 @dataclass
 class Prediction:
@@ -51,6 +54,9 @@ class Prediction:
     predicted_score2: str
     prediction: str
     confidence: int
+    home_odds: float = 0.0
+    draw_odds: float = 0.0
+    away_odds: float = 0.0
 
 class BettingBot:
     def __init__(self, config: Config):
@@ -119,6 +125,26 @@ class BettingBot:
                 # Prendre les matchs des prochaines 24 heures
                 if 0 < (commence_time - current_time).total_seconds() <= 86400:
                     competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
+                    
+                    # Extraire les cotes des bookmakers
+                    home_odds, draw_odds, away_odds = 0.0, 0.0, 0.0
+                    
+                    if match_data.get("bookmakers") and len(match_data["bookmakers"]) > 0:
+                        for bookmaker in match_data["bookmakers"]:
+                            if bookmaker.get("markets") and len(bookmaker["markets"]) > 0:
+                                for market in bookmaker["markets"]:
+                                    if market["key"] == "h2h" and len(market["outcomes"]) == 3:
+                                        for outcome in market["outcomes"]:
+                                            if outcome["name"] == match_data["home_team"]:
+                                                home_odds = outcome["price"]
+                                            elif outcome["name"] == match_data["away_team"]:
+                                                away_odds = outcome["price"]
+                                            else:
+                                                draw_odds = outcome["price"]
+                                        break
+                            if home_odds > 0 and draw_odds > 0 and away_odds > 0:
+                                break
+                    
                     matches.append(Match(
                         home_team=match_data["home_team"],
                         away_team=match_data["away_team"],
@@ -127,7 +153,10 @@ class BettingBot:
                         commence_time=commence_time,
                         bookmakers=match_data.get("bookmakers", []),
                         all_odds=match_data.get("bookmakers", []),
-                        priority=self.top_leagues.get(competition, 0)
+                        priority=self.top_leagues.get(competition, 0),
+                        home_odds=home_odds,
+                        draw_odds=draw_odds,
+                        away_odds=away_odds
                     ))
 
             if not matches:
@@ -141,7 +170,7 @@ class BettingBot:
             
             print(f"\n✅ {len(top_matches)} meilleurs matchs sélectionnés")
             for match in top_matches:
-                print(f"- {match.home_team} vs {match.away_team} ({match.competition})")
+                print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
                 
             return top_matches
 
@@ -153,38 +182,61 @@ class BettingBot:
     def get_match_stats(self, match: Match) -> Optional[str]:
         print(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
-            # Version simplifiée du prompt pour les statistiques
+            # Utiliser le même modèle et prompt que pour les scores exacts
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
                 headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
                         "Content-Type": "application/json"},
                 json={
-                    "model": "sonar",  # Utiliser le modèle plus rapide
+                    "model": "llama-3.1-sonar-large-128k-online",
                     "messages": [{
                         "role": "user", 
-                        "content": f"""Analyse factuelle pour le match {match.home_team} vs {match.away_team} ({match.competition}):
+                        "content": f"""Tu es une intelligence artificielle experte en analyse sportive de football. 
 
-1. Forme récente (5 derniers matchs) des équipes
-2. Confrontations directes récentes
-3. Statistiques de buts (moyenne de buts par match, % matchs avec +1.5, +2.5, -3.5 buts)
-4. Blessés/suspendus importants
-5. Contexte du match (enjeu, classement)"""
+Fais une analyse détaillée et factuelle pour le match {match.home_team} vs {match.away_team} ({match.competition}) qui aura lieu le {match.commence_time.strftime('%d/%m/%Y')}.
+
+Analyse OBLIGATOIREMENT tous ces éléments:
+1. FORME RÉCENTE:
+   - 5 derniers matchs de chaque équipe avec les résultats exacts
+   - Moyenne de buts marqués/encaissés par match
+   - Performance à domicile/extérieur (pourcentage de victoires)
+
+2. CONFRONTATIONS DIRECTES:
+   - Les 5 dernières rencontres entre ces équipes avec scores
+   - Tendances des confrontations (équipe dominante)
+   - Nombre moyen de buts dans ces confrontations
+
+3. STATISTIQUES CLÉS:
+   - Pourcentage de matchs avec +1.5 buts pour chaque équipe
+   - Pourcentage de matchs avec +2.5 buts pour chaque équipe
+   - Pourcentage de matchs avec -3.5 buts pour chaque équipe
+   - Pourcentage de matchs où les deux équipes marquent
+
+4. ABSENCES ET EFFECTIF:
+   - Joueurs blessés ou suspendus importants
+   - Impact des absences sur le jeu de l'équipe
+
+5. CONTEXTE DU MATCH:
+   - Enjeu sportif (qualification, maintien, position au classement)
+   - Importance du match pour chaque équipe
+
+Sois aussi précis et factuel que possible avec des statistiques réelles."""
                     }],
-                    "max_tokens": 500,
-                    "temperature": 0.2
+                    "max_tokens": 700,
+                    "temperature": 0.1
                 },
-                timeout=45  # 45 secondes de timeout
+                timeout=60  # 1 minute pour obtenir les statistiques
             )
             response.raise_for_status()
             stats = response.json()["choices"][0]["message"]["content"]
-            print("✅ Statistiques récupérées")
+            print("✅ Statistiques complètes récupérées")
             return stats
         except Exception as e:
             print(f"❌ Erreur lors de la récupération des statistiques: {str(e)}")
             
-            # En cas d'échec, essayer avec un prompt encore plus court et le modèle le plus rapide
+            # En cas d'échec, essayer avec un prompt plus court
             try:
-                print("⚠️ Deuxième tentative avec un prompt plus simple...")
+                print("⚠️ Tentative avec un prompt simplifié...")
                 response = requests.post(
                     "https://api.perplexity.ai/chat/completions",
                     headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
@@ -193,15 +245,18 @@ class BettingBot:
                         "model": "sonar",
                         "messages": [{
                             "role": "user", 
-                            "content": f"""Statistiques basiques pour {match.home_team} vs {match.away_team}:
-1. Forme récente des deux équipes
-2. Historique des confrontations
-3. Moyenne de buts"""
+                            "content": f"""Analyse factuelle pour le match {match.home_team} vs {match.away_team} ({match.competition}):
+
+1. Forme récente des deux équipes (résultats des 5 derniers matchs)
+2. Confrontations directes récentes
+3. Statistiques: matchs avec +1.5 buts, +2.5 buts, -3.5 buts
+4. Absences importantes
+5. Enjeu du match"""
                         }],
-                        "max_tokens": 300,
+                        "max_tokens": 500,
                         "temperature": 0.1
                     },
-                    timeout=30  # Timeout plus court
+                    timeout=45
                 )
                 response.raise_for_status()
                 stats = response.json()["choices"][0]["message"]["content"]
@@ -209,30 +264,12 @@ class BettingBot:
                 return stats
             except Exception as e:
                 print(f"❌ Erreur lors de la récupération des statistiques simplifiées: {str(e)}")
-                
-                # Statistiques de secours pour ne pas échouer l'analyse
-                fallback_stats = f"""Statistiques pour {match.home_team} vs {match.away_team} :
-
-Forme récente:
-- {match.home_team} est dans une forme moyenne ces derniers matchs
-- {match.away_team} a des performances variables récemment
-
-Tendances:
-- Les matchs de {match.competition} ont une moyenne de 2.5 buts par match
-- Environ 60% des matchs voient plus de 2.5 buts
-
-Contexte:
-- Les deux équipes ont besoin de points
-- Match important dans le cadre du championnat"""
-                
-                print("⚠️ Utilisation de statistiques de secours basiques")
-                return fallback_stats
+                return None
 
     @retry(tries=2, delay=5, backoff=2, logger=logger)
     def get_predicted_scores(self, match: Match) -> tuple:
         print(f"\n3️⃣ OBTENTION DES SCORES EXACTS PROBABLES POUR {match.home_team} vs {match.away_team}")
         try:
-            # Conserver le prompt original pour les scores exacts
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
                 headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
@@ -259,7 +296,7 @@ Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des 
                     "max_tokens": 100,
                     "temperature": 0.1
                 },
-                timeout=120  # 2 minutes pour les scores exacts comme demandé
+                timeout=120  # 2 minutes pour les scores exacts
             )
             response.raise_for_status()
             prediction_text = response.json()["choices"][0]["message"]["content"].strip()
@@ -310,21 +347,30 @@ Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des 
             prompt = f"""ANALYSE APPROFONDIE: {match.home_team} vs {match.away_team}
 COMPÉTITION: {match.competition}
 SCORES EXACTS PRÉDITS: {match.predicted_score1} et {match.predicted_score2}
+COTES: Victoire {match.home_team}: {match.home_odds}, Match nul: {match.draw_odds}, Victoire {match.away_team}: {match.away_odds}
 
 DONNÉES STATISTIQUES:
 {stats}
 
-CONSIGNES:
+CONSIGNES STRICTES:
 1. Analyser en profondeur les statistiques fournies et les scores exacts prédits
 2. Évaluer les tendances et performances des équipes
 3. Considérer les scores exacts prédits par les experts
 4. Choisir la prédiction LA PLUS SÛRE parmi: {', '.join(self.available_predictions)}
-5. Justifier avec précision
-6. Confiance minimale de 80%
+
+RÈGLES DE VÉRIFICATION OBLIGATOIRES:
+- Pour prédire une victoire directe ("1" ou "2"), l'équipe doit être clairement supérieure (différence de niveau significative) ET avoir une forme récente excellente
+- Si la cote d'une équipe est supérieure à 2.00, ne pas prédire sa victoire directe; préférer double chance (1X ou X2)
+- Pour prédire "+1.5 buts", la moyenne de buts dans les matchs récents des deux équipes doit être d'au moins 2
+- Pour prédire "+2.5 buts", la moyenne de buts doit être d'au moins 2.5
+- Pour prédire "-3.5 buts", l'historique doit montrer qu'au moins 80% des matchs récents ont vu moins de 4 buts
+- Ne jamais donner de prédiction sans une confiance d'au moins 80%
+- Privilégier les prédictions avec les statistiques les plus solides
 
 FORMAT REQUIS:
 PREDICTION: [une option de la liste]
-CONFIANCE: [pourcentage]"""
+CONFIANCE: [pourcentage]
+JUSTIFICATION: [explication brève de la prédiction basée sur les données]"""
 
             message = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -336,10 +382,12 @@ CONFIANCE: [pourcentage]"""
             response = message.content[0].text
             prediction = re.search(r"PREDICTION:\s*(.*)", response)
             confidence = re.search(r"CONFIANCE:\s*(\d+)", response)
+            justification = re.search(r"JUSTIFICATION:\s*(.*?)(?=\n|$)", response, re.DOTALL)
 
             if all([prediction, confidence]):
                 pred = prediction.group(1).strip()
                 conf = min(100, max(80, int(confidence.group(1))))
+                just = justification.group(1).strip() if justification else "Basé sur l'analyse des données et scores prédits"
                 
                 if any(p.lower() in pred.lower() for p in self.available_predictions):
                     # Trouver la prédiction exacte dans la liste
@@ -349,6 +397,19 @@ CONFIANCE: [pourcentage]"""
                             break
                             
                     print(f"✅ Prédiction: {pred} (Confiance: {conf}%)")
+                    print(f"✅ Justification: {just}")
+                    
+                    # Vérifications supplémentaires pour la fiabilité
+                    if pred == "1" and match.home_odds > 2.0:
+                        print("⚠️ Cote trop élevée pour prédire une victoire domicile directe. Prédiction rejetée.")
+                        return None
+                    elif pred == "2" and match.away_odds > 2.0:
+                        print("⚠️ Cote trop élevée pour prédire une victoire extérieure directe. Prédiction rejetée.")
+                        return None
+                    elif conf < 80:
+                        print("⚠️ Confiance insuffisante. Prédiction rejetée.")
+                        return None
+                    
                     return Prediction(
                         region=match.region,
                         competition=match.competition,
@@ -357,7 +418,10 @@ CONFIANCE: [pourcentage]"""
                         predicted_score1=match.predicted_score1,
                         predicted_score2=match.predicted_score2,
                         prediction=pred,
-                        confidence=conf
+                        confidence=conf,
+                        home_odds=match.home_odds,
+                        draw_odds=match.draw_odds,
+                        away_odds=match.away_odds
                     )
 
             print("❌ Pas de prédiction fiable")
@@ -376,10 +440,12 @@ CONFIANCE: [pourcentage]"""
 
         for i, pred in enumerate(predictions, 1):
             # Formatage des éléments avec gras et italique
+            odds_info = f"(Cotes: {pred.home_odds:.2f}/{pred.draw_odds:.2f}/{pred.away_odds:.2f})"
+            
             msg += (
                 f"*📊 MATCH #{i}*\n"
                 f"🏆 _{pred.competition}_\n"
-                f"*⚔️ {pred.match}*\n"
+                f"*⚔️ {pred.match}* {odds_info}\n"
                 f"⏰ Coup d'envoi : _{pred.time}_\n"
                 f"🔮 Scores prédits : *{pred.predicted_score1}* et *{pred.predicted_score2}*\n"
                 f"📈 Prédiction : *{pred.prediction}*\n"
@@ -437,6 +503,8 @@ CONFIANCE: [pourcentage]"""
                     prediction = self.analyze_match(match, stats)
                     if prediction:
                         predictions.append(prediction)
+                else:
+                    print(f"⚠️ Impossible d'obtenir des statistiques pour {match.home_team} vs {match.away_team}")
                         
                 # Attendre un peu entre chaque analyse pour ne pas surcharger les API
                 await asyncio.sleep(5)  # Attendre 5 secondes entre chaque match
