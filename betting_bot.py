@@ -42,7 +42,6 @@ class Match:
     priority: int = 0
     predicted_score1: str = ""
     predicted_score2: str = ""
-    stats_quality: str = "unknown"  # Qualité des statistiques: "real", "fallback", "unknown"
 
 @dataclass
 class Prediction:
@@ -54,7 +53,6 @@ class Prediction:
     predicted_score2: str
     prediction: str
     confidence: int
-    stats_quality: str = "real"  # Qualité des statistiques utilisées
 
 class BettingBot:
     def __init__(self, config: Config):
@@ -154,9 +152,9 @@ class BettingBot:
             print(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
             return []
 
-    @retry(tries=2, delay=5, backoff=2, logger=logger)
-    def get_match_stats(self, match: Match) -> Tuple[Optional[str], str]:
-        """Récupère les statistiques du match et retourne aussi la qualité des données"""
+    @retry(tries=3, delay=5, backoff=2, logger=logger)
+    def get_match_stats(self, match: Match) -> Optional[str]:
+        """Récupère les statistiques du match en utilisant le même prompt que pour les scores exacts"""
         print(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
             response = requests.post(
@@ -167,69 +165,62 @@ class BettingBot:
                     "model": "llama-3.1-sonar-large-128k-online",
                     "messages": [{
                         "role": "user", 
-                        "content": f"""Analyse détaillée pour {match.home_team} vs {match.away_team} ({match.competition}):
+                        "content": f"""Tu es une intelligence artificielle experte en analyse sportive, spécialisée dans le football. Tu utilises des modèles statistiques avancés, y compris la méthode ELO, pour analyser les matchs.
 
+Fais une analyse détaillée pour {match.home_team} vs {match.away_team} ({match.competition}) qui aura lieu le {match.commence_time.strftime('%d/%m/%Y')}.
+
+Pour générer cette analyse, tiens compte des éléments suivants:
 1. FORME:
-- 5 derniers matchs de chaque équipe
-- Buts marqués/encaissés par match
-- Résultats domicile/extérieur
+   - 5 derniers matchs de chaque équipe (résultats)
+   - Buts marqués/encaissés par match récemment
+   - Résultats à domicile/extérieur
 
 2. CONFRONTATIONS DIRECTES:
-- Historique des 5 dernières rencontres
-- Tendances des scores
-- Statistiques de buts dans ces matchs
+   - Historique des 5 dernières rencontres entre ces équipes
+   - Tendances des scores lors de ces confrontations
+   - Statistiques de buts dans ces matchs
 
 3. STATISTIQUES IMPORTANTES:
-- Moyenne de buts par match
-- % matchs avec +1.5 buts
-- % matchs avec +2.5 buts
-- % matchs avec -3.5 buts
-- % victoires/nuls/défaites
-- Performance à domicile/extérieur
+   - Moyenne de buts par match des deux équipes
+   - % matchs avec +1.5 buts pour les deux équipes
+   - % matchs avec +2.5 buts pour les deux équipes 
+   - % matchs avec -3.5 buts pour les deux équipes
+   - % victoires/nuls/défaites récents
+   - Force à domicile et à l'extérieur
 
 4. EFFECTIF:
-- Blessés et suspendus
-- Joueurs clés disponibles
+   - Blessés et suspendus importants
+   - Joueurs clés disponibles pour ce match
 
 5. CONTEXTE DU MATCH:
-- Enjeu sportif
-- Position au classement
-- Série en cours"""
+   - Enjeu sportif (qualification, maintien, titre)
+   - Position au classement des deux équipes
+   - Série en cours (victoires/défaites consécutives)
+
+Fournis une analyse COMPLÈTE et FACTUELLE qui couvre TOUS les points mentionnés ci-dessus."""
                     }],
                     "max_tokens": 800,
-                    "temperature": 0.2
+                    "temperature": 0.1
                 },
-                timeout=60  # Timeout de 60 secondes
+                timeout=180  # Timeout de 3 minutes pour avoir des statistiques complètes
             )
             response.raise_for_status()
             stats = response.json()["choices"][0]["message"]["content"]
+            
+            # Vérifier que les statistiques sont suffisamment complètes (au moins 300 caractères)
+            if len(stats) < 300:
+                print("❌ Statistiques obtenues trop limitées, considérées comme incomplètes")
+                return None
+                
             print("✅ Statistiques réelles récupérées")
-            return stats, "real"
+            return stats
         except Exception as e:
             print(f"❌ Erreur lors de la récupération des statistiques: {str(e)}")
-            # En cas d'échec, créer des statistiques génériques basées sur les équipes
-            fallback_stats = f"""ANALYSE DE SECOURS (générée suite à une erreur API):
+            return None
 
-1. FORME:
-- {match.home_team}: Forme moyenne récente
-- {match.away_team}: Forme moyenne récente
-
-2. STATISTIQUES IMPORTANTES:
-- Moyenne de buts par match: Environ 2.5
-- % matchs avec +1.5 buts: ~70%
-- % matchs avec +2.5 buts: ~50%
-- % matchs avec -3.5 buts: ~80%
-
-3. CONTEXTE DU MATCH:
-- Match important dans le cadre de {match.competition}
-- Les deux équipes ont besoin de points
-"""
-            print("⚠️ Utilisation de statistiques de secours génériques")
-            return fallback_stats, "fallback"
-
-    @retry(tries=2, delay=5, backoff=2, logger=logger)
-    def get_predicted_scores(self, match: Match) -> Tuple[str, str, bool]:
-        """Récupère les scores prédits et indique si ce sont des scores réels ou par défaut"""
+    @retry(tries=3, delay=5, backoff=2, logger=logger)
+    def get_predicted_scores(self, match: Match) -> Tuple[Optional[str], Optional[str]]:
+        """Récupère les scores prédits, retourne None si échec"""
         print(f"\n3️⃣ OBTENTION DES SCORES EXACTS PROBABLES POUR {match.home_team} vs {match.away_team}")
         try:
             response = requests.post(
@@ -258,7 +249,7 @@ Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des 
                     "max_tokens": 100,
                     "temperature": 0.1
                 },
-                timeout=60  # Timeout de 60 secondes
+                timeout=180  # Timeout de 3 minutes pour obtenir des prédictions fiables
             )
             response.raise_for_status()
             prediction_text = response.json()["choices"][0]["message"]["content"].strip()
@@ -271,7 +262,7 @@ Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des 
                 score1 = f"{score1_match.group(1)}-{score1_match.group(2)}"
                 score2 = f"{score2_match.group(1)}-{score2_match.group(2)}"
                 print(f"✅ Scores probables obtenus: {score1} et {score2}")
-                return score1, score2, True
+                return score1, score2
             else:
                 # Si le format n'est pas respecté, extraire les scores si possible
                 scores = re.findall(r'(\d+)[^\d]+(\d+)', prediction_text)
@@ -279,30 +270,16 @@ Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des 
                     score1 = f"{scores[0][0]}-{scores[0][1]}"
                     score2 = f"{scores[1][0]}-{scores[1][1]}"
                     print(f"✅ Scores probables extraits: {score1} et {score2}")
-                    return score1, score2, True
+                    return score1, score2
                 else:
-                    print("❌ Format de scores invalide, utilisation de scores par défaut")
-                    
-                    # Générer des scores par défaut basés sur la compétition
-                    if "Champions League" in match.competition or "Europa League" in match.competition:
-                        return "2-1", "2-2", False  # Plus de buts en compétitions européennes
-                    elif "Primera" in match.competition:
-                        return "1-0", "1-1", False  # Scores typiques en Liga espagnole/championnat argentin
-                    else:
-                        return "1-1", "2-1", False  # Scores génériques pour autres compétitions
+                    print("❌ Format de scores invalide, match ignoré")
+                    return None, None
                 
         except Exception as e:
             print(f"❌ Erreur lors de l'obtention des scores probables: {str(e)}")
-            
-            # Scores par défaut basés sur la compétition en cas d'erreur
-            if "Champions League" in match.competition or "Europa League" in match.competition:
-                return "2-1", "2-2", False
-            elif "Primera" in match.competition:
-                return "1-0", "1-1", False
-            else:
-                return "1-1", "2-1", False
+            return None, None
 
-    def analyze_match(self, match: Match, stats: str, stats_quality: str) -> Optional[Prediction]:
+    def analyze_match(self, match: Match, stats: str) -> Optional[Prediction]:
         """Analyse le match avec Claude et retourne une prédiction"""
         print(f"\n4️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
         
@@ -357,11 +334,10 @@ CONFIANCE: [pourcentage]"""
                         predicted_score1=match.predicted_score1,
                         predicted_score2=match.predicted_score2,
                         prediction=pred,
-                        confidence=conf,
-                        stats_quality=stats_quality
+                        confidence=conf
                     )
 
-            print("❌ Pas de prédiction fiable")
+            print("❌ Pas de prédiction fiable obtenue")
             return None
 
         except Exception as e:
@@ -416,7 +392,7 @@ CONFIANCE: [pourcentage]"""
                 parse_mode="Markdown",  # Activer le formatage Markdown
                 disable_web_page_preview=True
             )
-            print("✅ Prédictions envoyées!")
+            print(f"✅ {len(predictions)} prédictions envoyées!")
             
         except Exception as e:
             print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
@@ -425,23 +401,27 @@ CONFIANCE: [pourcentage]"""
         """Traite un match complet et retourne une prédiction si réussie"""
         try:
             # Obtenir les deux scores exacts probables
-            score1, score2, scores_real = self.get_predicted_scores(match)
+            score1, score2 = self.get_predicted_scores(match)
+            if score1 is None or score2 is None:
+                print(f"⚠️ Impossible d'obtenir des scores valides pour {match.home_team} vs {match.away_team}. Match ignoré.")
+                return None
+                
             match.predicted_score1 = score1
             match.predicted_score2 = score2
             
             # Obtenir les statistiques
-            stats, stats_quality = self.get_match_stats(match)
-            match.stats_quality = stats_quality
+            stats = self.get_match_stats(match)
+            if not stats:
+                print(f"⚠️ Impossible d'obtenir des statistiques pour {match.home_team} vs {match.away_team}. Match ignoré.")
+                return None
             
-            if stats:
-                return self.analyze_match(match, stats, stats_quality)
-            return None
+            return self.analyze_match(match, stats)
         except Exception as e:
             print(f"❌ Erreur lors du traitement du match {match.home_team} vs {match.away_team}: {str(e)}")
             return None
             
     async def run(self) -> None:
-        """Exécute le processus principal et s'assure d'obtenir au moins MIN_PREDICTIONS prédictions"""
+        """Exécute le processus principal en s'assurant d'avoir des données statistiques réelles"""
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             
@@ -449,72 +429,77 @@ CONFIANCE: [pourcentage]"""
             all_matches = self.fetch_matches(max_match_count=15)
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
+                
+                # Envoyer un message d'absence de matchs
+                await self.bot.send_message(
+                    chat_id=self.config.TELEGRAM_CHAT_ID,
+                    text="*🤖 AL VE AI BOT - NOTIFICATION*\n\nAucun match prévu dans les prochaines 24 heures.",
+                    parse_mode="Markdown"
+                )
                 return
                 
             predictions = []
-            processed_matches = []
-            remaining_matches = list(all_matches)  # Copier la liste pour pouvoir modifier
+            processed_matches_count = 0
             
-            # Premier essai avec les 5 principaux matchs
-            initial_matches = remaining_matches[:self.config.MAX_MATCHES]
-            remaining_matches = remaining_matches[self.config.MAX_MATCHES:]
+            # Mélanger légèrement les matchs pour varier les prédictions
+            # tout en gardant les matchs prioritaires en premier
+            priority_matches = all_matches[:self.config.MAX_MATCHES]
+            remaining_matches = all_matches[self.config.MAX_MATCHES:]
+            random.shuffle(remaining_matches)
             
-            print(f"\n🔍 Analyse des {len(initial_matches)} matchs prioritaires...")
-            for match in initial_matches:
-                prediction = await self.process_match(match)
-                processed_matches.append(match)
+            all_matches_ordered = priority_matches + remaining_matches
+            
+            # Traiter les matchs jusqu'à avoir le nombre minimum de prédictions
+            for match in all_matches_ordered:
+                if len(predictions) >= self.config.MIN_PREDICTIONS:
+                    print(f"🎯 Nombre requis de prédictions atteint: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
+                    break
+                    
+                processed_matches_count += 1
+                print(f"\n🔍 Analyse du match {processed_matches_count}/{len(all_matches_ordered)}: {match.home_team} vs {match.away_team}")
                 
+                prediction = await self.process_match(match)
                 if prediction:
                     predictions.append(prediction)
-                
-                # Attendre un peu entre chaque analyse pour ne pas surcharger les API
-                await asyncio.sleep(5)
-                
-            # Si nous n'avons pas assez de prédictions, essayer avec les matchs restants
-            if len(predictions) < self.config.MIN_PREDICTIONS and remaining_matches:
-                print(f"\n⚠️ Seulement {len(predictions)}/{self.config.MIN_PREDICTIONS} prédictions obtenues. Analyse de matchs supplémentaires...")
-                
-                # Mélanger les matchs restants pour varier les prédictions
-                random.shuffle(remaining_matches)
-                
-                # Combien de matchs supplémentaires devons-nous traiter
-                matches_needed = self.config.MIN_PREDICTIONS - len(predictions)
-                backup_matches = remaining_matches[:matches_needed*2]  # Prendre le double au cas où certains échouent
-                
-                for match in backup_matches:
-                    if len(predictions) >= self.config.MIN_PREDICTIONS:
-                        break
-                        
-                    prediction = await self.process_match(match)
-                    processed_matches.append(match)
-                    
-                    if prediction:
-                        predictions.append(prediction)
-                    
-                    # Attendre un peu entre chaque analyse
-                    await asyncio.sleep(5)
-            
-            print(f"\n✅ {len(predictions)}/{len(processed_matches)} matchs analysés avec succès")
-            
-            if predictions:
-                if len(predictions) >= self.config.MIN_PREDICTIONS:
-                    print(f"🎯 Nombre cible de prédictions atteint: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
+                    print(f"✅ Prédiction {len(predictions)}/{self.config.MIN_PREDICTIONS} obtenue")
                 else:
-                    print(f"⚠️ Nombre insuffisant de prédictions: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
-                    
-                # Limiter au nombre maximum de prédictions
-                if len(predictions) > self.config.MAX_MATCHES:
-                    print(f"ℹ️ Limitation à {self.config.MAX_MATCHES} prédictions")
-                    predictions = predictions[:self.config.MAX_MATCHES]
-                    
-                # Envoyer les prédictions
+                    print(f"⚠️ Pas de prédiction obtenue pour ce match (problème de données)")
+                
+                # Attendre entre chaque analyse pour ne pas surcharger les API
+                await asyncio.sleep(5)
+            
+            print(f"\n🔄 {processed_matches_count} matchs traités, {len(predictions)} prédictions obtenues")
+            
+            if len(predictions) >= self.config.MIN_PREDICTIONS:
+                print(f"✅ Nombre minimum de prédictions atteint: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
                 await self.send_predictions(predictions)
                 print("=== ✅ EXÉCUTION TERMINÉE ===")
             else:
-                print("❌ Aucune prédiction fiable n'a pu être générée")
+                print(f"⚠️ Nombre insuffisant de prédictions: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
+                if predictions:
+                    # Envoyer quand même les prédictions disponibles
+                    await self.send_predictions(predictions)
+                    print(f"=== ⚠️ EXÉCUTION TERMINÉE AVEC MOINS DE PRÉDICTIONS QUE REQUIS ===")
+                else:
+                    # Aucune prédiction disponible
+                    await self.bot.send_message(
+                        chat_id=self.config.TELEGRAM_CHAT_ID,
+                        text="*🤖 AL VE AI BOT - ERREUR*\n\nImpossible de générer des prédictions fiables aujourd'hui. Nouvelle tentative prévue demain.",
+                        parse_mode="Markdown"
+                    )
+                    print("=== ❌ AUCUNE PRÉDICTION GÉNÉRÉE ===")
 
         except Exception as e:
             print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
+            # Notifier de l'erreur
+            try:
+                await self.bot.send_message(
+                    chat_id=self.config.TELEGRAM_CHAT_ID,
+                    text=f"*🤖 AL VE AI BOT - ERREUR*\n\nUne erreur s'est produite lors de la génération des prédictions: {str(e)}",
+                    parse_mode="Markdown"
+                )
+            except:
+                pass
 
 async def send_test_message(bot, chat_id):
     """Envoie un message de test pour vérifier la connectivité avec Telegram"""
