@@ -11,6 +11,7 @@ import re
 import sys
 from retry import retry
 import pytz  # Pour gérer les fuseaux horaires
+import os   # Pour les variables d'environnement
 
 # Configuration de base
 nest_asyncio.apply()
@@ -105,7 +106,7 @@ class BettingBot:
         }
 
         try:
-            response = requests.get(url, params=params, timeout=15)
+            response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
             matches_data = response.json()
             print(f"✅ {len(matches_data)} matchs récupérés")
@@ -148,7 +149,7 @@ class BettingBot:
             print(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
             return []
 
-    @retry(tries=2, delay=3, backoff=2, logger=logger)
+    @retry(tries=2, delay=5, backoff=2, logger=logger)
     def get_match_stats(self, match: Match) -> Optional[str]:
         print(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
@@ -157,7 +158,7 @@ class BettingBot:
                 headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
                         "Content-Type": "application/json"},
                 json={
-                    "model": "sonar",  # Modèle plus rapide
+                    "model": "llama-3.1-sonar-large-128k-online",
                     "messages": [{
                         "role": "user", 
                         "content": f"""Analyse détaillée pour {match.home_team} vs {match.away_team} ({match.competition}):
@@ -170,6 +171,7 @@ class BettingBot:
 2. CONFRONTATIONS DIRECTES:
 - Historique des 5 dernières rencontres
 - Tendances des scores
+- Statistiques de buts dans ces matchs
 
 3. STATISTIQUES IMPORTANTES:
 - Moyenne de buts par match
@@ -177,15 +179,21 @@ class BettingBot:
 - % matchs avec +2.5 buts
 - % matchs avec -3.5 buts
 - % victoires/nuls/défaites
+- Performance à domicile/extérieur
 
 4. EFFECTIF:
-- Blessés et suspendus importants
-- Joueurs clés disponibles"""
+- Blessés et suspendus
+- Joueurs clés disponibles
+
+5. CONTEXTE DU MATCH:
+- Enjeu sportif
+- Position au classement
+- Série en cours"""
                     }],
-                    "max_tokens": 500,
+                    "max_tokens": 800,
                     "temperature": 0.2
                 },
-                timeout=45  # Augmentation du timeout à 45 secondes
+                timeout=90  # Augmentation du timeout à 90 secondes
             )
             response.raise_for_status()
             stats = response.json()["choices"][0]["message"]["content"]
@@ -213,30 +221,37 @@ class BettingBot:
             print("⚠️ Utilisation de statistiques de secours génériques")
             return fallback_stats
 
-    @retry(tries=2, delay=3, backoff=2, logger=logger)
+    @retry(tries=2, delay=5, backoff=2, logger=logger)
     def get_predicted_scores(self, match: Match) -> tuple:
         print(f"\n3️⃣ OBTENTION DES SCORES EXACTS PROBABLES POUR {match.home_team} vs {match.away_team}")
         try:
-            # Version simplifiée du prompt pour plus de fiabilité
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
                 headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
                         "Content-Type": "application/json"},
                 json={
-                    "model": "sonar",  # Modèle plus rapide
+                    "model": "llama-3.1-sonar-large-128k-online",
                     "messages": [{
                         "role": "user", 
-                        "content": f"""En tant qu'expert en paris sportifs, donne-moi exactement deux scores exacts probables pour le match {match.home_team} vs {match.away_team} en {match.competition}.
+                        "content": f"""Tu es une intelligence artificielle experte en paris sportifs, spécialisée dans la prédiction de scores exacts. Tu utilises des modèles statistiques avancés, y compris la méthode ELO, pour évaluer la force relative des équipes et estimer le nombre de buts potentiels de chaque équipe dans un match.
 
-Réponds strictement au format "Score 1: X-Y, Score 2: Z-W" (où X, Y, Z, W sont des chiffres).
-Par exemple: "Score 1: 2-1, Score 2: 1-1"
+Objectif: Générer deux propositions de scores exacts pour le match {match.home_team} vs {match.away_team} qui aura lieu le {match.commence_time.strftime('%d/%m/%Y')} en {match.competition}.
 
-Ne donne aucune explication ou texte supplémentaire."""
+Pour générer ces prédictions, analyse les éléments suivants:
+1. Contexte du match (compétition, enjeu, phase du tournoi)
+2. Forme et performances des équipes (5 derniers matchs, buts marqués/encaissés)
+3. Confrontations directes (historique entre les équipes)
+4. Absences et forme des joueurs clés
+5. Analyse avec la méthode ELO et statistiques avancées
+6. Tendances des bookmakers et experts
+7. Facteurs psychologiques et extra-sportifs
+
+Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des nombres entiers. Ne donne aucune autre information ou explication."""
                     }],
-                    "max_tokens": 30,
+                    "max_tokens": 100,
                     "temperature": 0.1
                 },
-                timeout=45  # Augmentation du timeout à 45 secondes
+                timeout=120  # Augmentation du timeout à 120 secondes (2 minutes)
             )
             response.raise_for_status()
             prediction_text = response.json()["choices"][0]["message"]["content"].strip()
@@ -416,7 +431,7 @@ CONFIANCE: [pourcentage]"""
                         predictions.append(prediction)
                         
                 # Attendre un peu entre chaque analyse pour ne pas surcharger les API
-                await asyncio.sleep(5)  # Augmenté à 5 secondes pour laisser respirer l'API
+                await asyncio.sleep(7)  # Augmenté à 7 secondes pour laisser respirer l'API
 
             if predictions:
                 # Envoyer les prédictions une seule fois
@@ -428,29 +443,59 @@ CONFIANCE: [pourcentage]"""
         except Exception as e:
             print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
 
+async def send_test_message(bot, chat_id):
+    """Envoie un message de test pour vérifier la connectivité avec Telegram"""
+    try:
+        message = "*🤖 AL VE AI BOT - TEST DE CONNEXION*\n\nLe bot de paris a été déployé avec succès et est prêt à générer des prédictions!"
+        await bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode="Markdown"
+        )
+        print("✅ Message de test envoyé")
+    except Exception as e:
+        print(f"❌ Erreur lors de l'envoi du message de test: {str(e)}")
+
 async def scheduler():
+    print("Démarrage du bot de paris sportifs...")
+    
+    # Configuration à partir des variables d'environnement
+    config = Config(
+        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", "votre_token_telegram"),
+        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", "votre_chat_id"),
+        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", "votre_cle_odds"),
+        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", "votre_cle_perplexity"),
+        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", "votre_cle_claude"),
+        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5"))
+    )
+    
+    bot = BettingBot(config)
+    
+    # Vérifier si l'exécution immédiate est demandée
+    RUN_ON_STARTUP = os.environ.get("RUN_ON_STARTUP", "true").lower() == "true"
+    
+    # Envoyer un message de test au démarrage
+    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
+    
+    # Exécuter immédiatement si RUN_ON_STARTUP est vrai
+    if RUN_ON_STARTUP:
+        print("Exécution immédiate au démarrage...")
+        await bot.run()
+    
+    # Boucle principale du scheduler
     while True:
         # Heure actuelle en Afrique centrale (UTC+1)
         africa_central_time = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
         now = datetime.now(africa_central_time)
-
-        # Vérifier si c'est 7h00
+        
+        # Exécution planifiée à 7h00
         if now.hour == 7 and now.minute == 0:
-            print(f"Exécution du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            config = Config(
-                TELEGRAM_BOT_TOKEN="votre_token_telegram",
-                TELEGRAM_CHAT_ID="votre_chat_id",
-                ODDS_API_KEY="votre_cle_odds",
-                PERPLEXITY_API_KEY="votre_cle_perplexity",
-                CLAUDE_API_KEY="votre_cle_claude",
-                MAX_MATCHES=5
-            )
-            bot = BettingBot(config)
+            print(f"Exécution planifiée du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
             await bot.run()
-
+            
             # Attendre 1 minute pour éviter les exécutions multiples
             await asyncio.sleep(60)
-
+        
         # Attendre 1 minute avant de vérifier à nouveau
         await asyncio.sleep(60)
 
