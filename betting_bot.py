@@ -102,8 +102,8 @@ class BettingBot:
         return league_mappings.get(competition, competition)
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
-    def fetch_matches(self, max_match_count: int = 30) -> List[Match]:
-        """Récupère les matchs du jour pour avoir suffisamment de choix"""
+    def fetch_matches(self, max_match_count: int = 15) -> List[Match]:
+        """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent"""
         print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
@@ -123,15 +123,10 @@ class BettingBot:
             current_time = datetime.now(timezone.utc)
             matches = []
 
-            # Obtenir la date d'aujourd'hui (sans l'heure) en UTC
-            today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            tomorrow_utc = today_utc + timedelta(days=1)
-
             for match_data in matches_data:
                 commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
-                
-                # Ne prendre que les matchs qui se jouent aujourd'hui
-                if today_utc <= commence_time < tomorrow_utc:
+                # Prendre les matchs des prochaines 24 heures
+                if 0 < (commence_time - current_time).total_seconds() <= 86400:
                     competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
                     
                     # Extraire les cotes des bookmakers
@@ -153,24 +148,21 @@ class BettingBot:
                             if home_odds > 0 and draw_odds > 0 and away_odds > 0:
                                 break
                     
-                    # Ne garder que les matchs avec des cotes complètes
-                    if home_odds > 0 and draw_odds > 0 and away_odds > 0:
-                        matches.append(Match(
-                            home_team=match_data["home_team"],
-                            away_team=match_data["away_team"],
-                            competition=competition,
-                            region=competition.split()[-1] if " " in competition else competition,
-                            commence_time=commence_time,
-                            bookmakers=match_data.get("bookmakers", []),
-                            all_odds=match_data.get("bookmakers", []),
-                            priority=self.top_leagues.get(competition, 0),
-                            home_odds=home_odds,
-                            draw_odds=draw_odds,
-                            away_odds=away_odds
-                        ))
+                    matches.append(Match(
+                        home_team=match_data["home_team"],
+                        away_team=match_data["away_team"],
+                        competition=competition,
+                        region=competition.split()[-1] if " " in competition else competition,
+                        commence_time=commence_time,
+                        bookmakers=match_data.get("bookmakers", []),
+                        all_odds=match_data.get("bookmakers", []),
+                        priority=self.top_leagues.get(competition, 0),
+                        home_odds=home_odds,
+                        draw_odds=draw_odds,
+                        away_odds=away_odds
+                    ))
 
             if not matches:
-                print("❌ Aucun match trouvé pour aujourd'hui")
                 return []
 
             # Trier les matchs par priorité et heure de début
@@ -180,9 +172,8 @@ class BettingBot:
             top_matches = matches[:max_match_count]
             
             print(f"\n✅ {len(top_matches)} matchs candidats sélectionnés")
-            for i, match in enumerate(top_matches[:10]):
-                match_time = match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M")
-                print(f"{i+1}. {match_time} - {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
+            for match in top_matches[:5]:
+                print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
                 
             return top_matches
 
@@ -484,79 +475,63 @@ CONFIANCE: [pourcentage]"""
     async def run(self) -> None:
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
-            
-            # 1. Récupérer tous les matchs du jour (jusqu'à 30)
-            all_matches = self.fetch_matches(max_match_count=30)
-            
+            all_matches = self.fetch_matches()
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
                 return
-            
-            # 2. Variables pour suivre la progression
+
             predictions = []
-            processed_indices = set()
-            current_index = 0
+            processed_count = 0
             
-            # 3. Traiter les matchs jusqu'à avoir exactement 5 prédictions
-            while len(predictions) < self.config.MAX_MATCHES and current_index < len(all_matches):
-                # Si on a déjà traité ce match, passer au suivant
-                if current_index in processed_indices:
-                    current_index += 1
-                    continue
+            # On continue jusqu'à avoir le nombre minimum requis de prédictions
+            # ou jusqu'à épuiser tous les matchs disponibles
+            for match in all_matches:
+                processed_count += 1
                 
-                current_match = all_matches[current_index]
-                processed_indices.add(current_index)
+                # Si on a atteint le nombre de prédictions requis, on s'arrête
+                if len(predictions) >= self.config.MIN_PREDICTIONS:
+                    break
                 
-                print(f"\n⏳ TRAITEMENT DU MATCH {current_index+1}/{len(all_matches)}: {current_match.home_team} vs {current_match.away_team}")
-                
-                # Obtenir les scores prédits
-                scores = self.get_predicted_scores(current_match)
+                # Obtenir les deux scores exacts probables
+                scores = self.get_predicted_scores(match)
                 if not scores:
-                    print("⚠️ Impossible d'obtenir des scores prédits. Passage au match suivant.")
-                    current_index += 1
+                    print(f"⚠️ Impossible d'obtenir des scores exacts pour {match.home_team} vs {match.away_team}. Match ignoré.")
                     continue
-                
-                current_match.predicted_score1, current_match.predicted_score2 = scores
+                    
+                match.predicted_score1, match.predicted_score2 = scores
                 
                 # Obtenir les statistiques
-                stats = self.get_match_stats(current_match)
+                stats = self.get_match_stats(match)
                 if not stats:
-                    print("⚠️ Impossible d'obtenir des statistiques. Passage au match suivant.")
-                    current_index += 1
+                    print(f"⚠️ Impossible d'obtenir des statistiques pour {match.home_team} vs {match.away_team}. Match ignoré.")
                     continue
                 
-                # Analyser et obtenir une prédiction
-                prediction = self.analyze_match(current_match, stats)
-                if not prediction:
-                    print("⚠️ Analyse avec Claude non concluante. Passage au match suivant.")
-                    current_index += 1
-                    continue
+                # Analyser le match et obtenir une prédiction
+                prediction = self.analyze_match(match, stats)
+                if prediction:
+                    predictions.append(prediction)
+                    print(f"✅ Prédiction {len(predictions)}/{self.config.MAX_MATCHES} obtenue")
                 
-                # Ajouter la prédiction et passer au match suivant
-                predictions.append(prediction)
-                print(f"✅ Prédiction {len(predictions)}/{self.config.MAX_MATCHES} obtenue")
-                current_index += 1
+                # Attendre un peu entre chaque analyse pour ne pas surcharger les API
+                await asyncio.sleep(5)  # Attendre 5 secondes entre chaque match
+            
+            print(f"\n📊 {processed_count} matchs traités, {len(predictions)} prédictions obtenues")
+            
+            if predictions:
+                if len(predictions) >= self.config.MIN_PREDICTIONS:
+                    print(f"✅ Nombre requis de prédictions atteint: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
+                else:
+                    print(f"⚠️ Seulement {len(predictions)}/{self.config.MIN_PREDICTIONS} prédictions obtenues")
                 
-                # Pause de 3 secondes entre chaque analyse complète
-                if len(predictions) < self.config.MAX_MATCHES and current_index < len(all_matches):
-                    await asyncio.sleep(3)
-            
-            # 4. Vérifier les résultats
-            print(f"\n📊 {len(processed_indices)}/{len(all_matches)} matchs traités, {len(predictions)}/{self.config.MAX_MATCHES} prédictions obtenues")
-            
-            # 5. Envoyer les prédictions
-            if len(predictions) == self.config.MAX_MATCHES:
-                print(f"✅ Nombre exact de prédictions atteint: {len(predictions)}/{self.config.MAX_MATCHES}")
+                # Limiter au nombre maximum de prédictions si nécessaire
+                if len(predictions) > self.config.MAX_MATCHES:
+                    predictions = predictions[:self.config.MAX_MATCHES]
+                
+                # Envoyer les prédictions disponibles
                 await self.send_predictions(predictions)
-                print("=== ✅ EXÉCUTION TERMINÉE AVEC SUCCÈS ===")
-            elif len(predictions) > 0:
-                print(f"⚠️ Seulement {len(predictions)}/{self.config.MAX_MATCHES} prédictions obtenues")
-                print("⚠️ Envoi des prédictions disponibles...")
-                await self.send_predictions(predictions)
-                print("=== ⚠️ EXÉCUTION TERMINÉE AVEC AVERTISSEMENT ===")
+                print("=== ✅ EXÉCUTION TERMINÉE ===")
             else:
                 print("❌ Aucune prédiction fiable n'a pu être générée")
-                print("=== ❌ EXÉCUTION TERMINÉE AVEC ÉCHEC ===")
 
         except Exception as e:
             print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
