@@ -103,8 +103,8 @@ class BettingBot:
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def fetch_matches(self) -> List[Match]:
-        """Récupère tous les matchs du jour"""
-        print("\n1️⃣ RÉCUPÉRATION DES MATCHS DU JOUR...")
+        """Récupère les matchs du jour et des prochaines 24h si nécessaire"""
+        print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
             "apiKey": self.config.ODDS_API_KEY,
@@ -119,18 +119,33 @@ class BettingBot:
             response.raise_for_status()
             matches_data = response.json()
             print(f"✅ {len(matches_data)} matchs récupérés depuis l'API")
+            
+            # Information de débogage
+            now_utc = datetime.now(timezone.utc)
+            print(f"⏰ Heure actuelle (UTC): {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            # Obtenir la date d'aujourd'hui (sans l'heure) en UTC
-            today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            tomorrow_utc = today_utc + timedelta(days=1)
+            # Définir aujourd'hui comme la période de 24h à partir de maintenant
+            # au lieu d'utiliser le jour calendaire
+            start_time = now_utc
+            end_time = start_time + timedelta(hours=24)
+            
+            print(f"⏰ Période de recherche: {start_time.strftime('%Y-%m-%d %H:%M')} à {end_time.strftime('%Y-%m-%d %H:%M')}")
             
             matches = []
-
+            
+            # Analyser et filtrer tous les matchs
             for match_data in matches_data:
                 commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
                 
-                # UNIQUEMENT les matchs qui se jouent aujourd'hui
-                if today_utc <= commence_time < tomorrow_utc:
+                # IMPORTANT: Afficher l'heure de début pour le débogage
+                match_time_str = commence_time.strftime('%Y-%m-%d %H:%M')
+                print(f"🏆 Match trouvé: {match_data['home_team']} vs {match_data['away_team']} à {match_time_str}")
+                
+                # Prendre les matchs des prochaines 24h
+                time_diff = (commence_time - start_time).total_seconds()
+                
+                # Nouvelle condition: prendre les matchs des prochaines 24h
+                if 0 <= time_diff <= 86400:  # 24h en secondes
                     competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
                     
                     # Extraire les cotes
@@ -167,17 +182,27 @@ class BettingBot:
                             draw_odds=draw_odds,
                             away_odds=away_odds
                         ))
+                        print(f"✅ Match ajouté: {match_data['home_team']} vs {match_data['away_team']}")
+                    else:
+                        print(f"⚠️ Match ignoré (cotes incomplètes): {match_data['home_team']} vs {match_data['away_team']}")
+                else:
+                    # Le match est trop loin
+                    hours_until_match = time_diff / 3600
+                    if hours_until_match < 0:
+                        print(f"⚠️ Match ignoré (déjà joué): {match_data['home_team']} vs {match_data['away_team']}")
+                    else:
+                        print(f"⚠️ Match ignoré (trop loin, dans {hours_until_match:.1f}h): {match_data['home_team']} vs {match_data['away_team']}")
 
             if not matches:
-                print(f"❌ Aucun match trouvé pour aujourd'hui")
+                print(f"❌ Aucun match trouvé pour les prochaines 24h")
                 return []
 
             # Trier les matchs par priorité (ligues importantes d'abord) puis par heure
             matches.sort(key=lambda x: (-x.priority, x.commence_time))
             
-            print(f"\n✅ {len(matches)} matchs disponibles pour aujourd'hui")
-            for i, match in enumerate(matches[:10]):  # Afficher les 10 premiers matchs au maximum
-                match_time = match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M")
+            print(f"\n✅ {len(matches)} matchs disponibles pour les prochaines 24h")
+            for i, match in enumerate(matches[:10]):  # Afficher jusqu'à 10 matchs
+                match_time = match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%d/%m %H:%M")
                 print(f"{i+1}. {match_time} - {match.home_team} vs {match.away_team} ({match.competition})")
                 
             return matches
@@ -508,21 +533,21 @@ CONFIANCE: [pourcentage]"""
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             
-            # 1. Récupérer tous les matchs du jour
+            # 1. Récupérer les matchs disponibles (24h glissantes)
             all_matches = self.fetch_matches()
             
             if not all_matches:
-                print("❌ Aucun match trouvé pour aujourd'hui")
+                print("❌ Aucun match trouvé pour les prochaines 24h")
                 return
                 
             # 2. Informations sur les matchs disponibles
-            print(f"\n📋 {len(all_matches)} matchs disponibles aujourd'hui")
+            print(f"\n📋 {len(all_matches)} matchs disponibles")
             if len(all_matches) < self.config.MAX_MATCHES:
                 print(f"⚠️ Attention: moins de matchs que nécessaire ({len(all_matches)} < {self.config.MAX_MATCHES})")
             
             # 3. Obtenir les prédictions
             predictions = []
-            predictions_needed = self.config.MAX_MATCHES  # Nombre de prédictions à obtenir
+            predictions_needed = min(self.config.MAX_MATCHES, len(all_matches))
             processed_count = 0
             
             # CORRECTION PRINCIPALE: utilisation d'une approche adaptative pour obtenir 5 prédictions
