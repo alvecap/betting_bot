@@ -670,3 +670,6 @@ CONFIANCE: [pourcentage]"""
                 print("=== ✅ EXÉCUTION TERMINÉE ===")
             else:
                 print("❌ Aucune prédiction fiable n'a pu être générée")
+        
+        except Exception as e:
+            print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
