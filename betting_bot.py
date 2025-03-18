@@ -101,9 +101,9 @@ class BettingBot:
         }
         return league_mappings.get(competition, competition)
 
-    def fetch_all_matches(self) -> List[Match]:
-        """Récupère TOUS les matchs disponibles pour aujourd'hui sans filtre"""
-        print("\n1️⃣ RÉCUPÉRATION DE TOUS LES MATCHS DISPONIBLES...")
+    def fetch_todays_matches(self) -> List[Match]:
+        """Récupère UNIQUEMENT les matchs du jour"""
+        print("\n1️⃣ RÉCUPÉRATION DES MATCHS DU JOUR...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
             "apiKey": self.config.ODDS_API_KEY,
@@ -123,89 +123,69 @@ class BettingBot:
             today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             tomorrow_utc = today_utc + timedelta(days=1)
             
-            matches = []
-            valid_matches = []
             today_matches = []
 
-            # Collecte de TOUS les matchs avec des cotes valides
+            # Ne garder que les matchs d'aujourd'hui
             for match_data in matches_data:
                 commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
-                competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
                 
-                # Extraire les cotes
-                home_odds, draw_odds, away_odds = 0.0, 0.0, 0.0
-                
-                if match_data.get("bookmakers") and len(match_data["bookmakers"]) > 0:
-                    for bookmaker in match_data["bookmakers"]:
-                        if bookmaker.get("markets") and len(bookmaker["markets"]) > 0:
-                            for market in bookmaker["markets"]:
-                                if market["key"] == "h2h" and len(market["outcomes"]) == 3:
-                                    for outcome in market["outcomes"]:
-                                        if outcome["name"] == match_data["home_team"]:
-                                            home_odds = outcome["price"]
-                                        elif outcome["name"] == match_data["away_team"]:
-                                            away_odds = outcome["price"]
-                                        else:
-                                            draw_odds = outcome["price"]
-                                    break
-                        if home_odds > 0 and draw_odds > 0 and away_odds > 0:
-                            break
-                
-                # Ne garder que les matchs avec des cotes complètes
-                if home_odds > 0 and draw_odds > 0 and away_odds > 0:
-                    match = Match(
-                        home_team=match_data["home_team"],
-                        away_team=match_data["away_team"],
-                        competition=competition,
-                        region=competition.split()[-1] if " " in competition else competition,
-                        commence_time=commence_time,
-                        bookmakers=match_data.get("bookmakers", []),
-                        all_odds=match_data.get("bookmakers", []),
-                        priority=self.top_leagues.get(competition, 0),
-                        home_odds=home_odds,
-                        draw_odds=draw_odds,
-                        away_odds=away_odds
-                    )
-                    valid_matches.append(match)
+                # UNIQUEMENT les matchs qui se jouent aujourd'hui
+                if today_utc <= commence_time < tomorrow_utc:
+                    competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
                     
-                    # Identifier spécifiquement les matchs d'aujourd'hui
-                    if today_utc <= commence_time < tomorrow_utc:
-                        today_matches.append(match)
+                    # Extraire les cotes
+                    home_odds, draw_odds, away_odds = 0.0, 0.0, 0.0
+                    
+                    if match_data.get("bookmakers") and len(match_data["bookmakers"]) > 0:
+                        for bookmaker in match_data["bookmakers"]:
+                            if bookmaker.get("markets") and len(bookmaker["markets"]) > 0:
+                                for market in bookmaker["markets"]:
+                                    if market["key"] == "h2h" and len(market["outcomes"]) == 3:
+                                        for outcome in market["outcomes"]:
+                                            if outcome["name"] == match_data["home_team"]:
+                                                home_odds = outcome["price"]
+                                            elif outcome["name"] == match_data["away_team"]:
+                                                away_odds = outcome["price"]
+                                            else:
+                                                draw_odds = outcome["price"]
+                                        break
+                            if home_odds > 0 and draw_odds > 0 and away_odds > 0:
+                                break
+                    
+                    # Ne garder que les matchs avec des cotes complètes
+                    if home_odds > 0 and draw_odds > 0 and away_odds > 0:
+                        today_matches.append(Match(
+                            home_team=match_data["home_team"],
+                            away_team=match_data["away_team"],
+                            competition=competition,
+                            region=competition.split()[-1] if " " in competition else competition,
+                            commence_time=commence_time,
+                            bookmakers=match_data.get("bookmakers", []),
+                            all_odds=match_data.get("bookmakers", []),
+                            priority=self.top_leagues.get(competition, 0),
+                            home_odds=home_odds,
+                            draw_odds=draw_odds,
+                            away_odds=away_odds
+                        ))
 
-            print(f"✅ {len(valid_matches)} matchs avec cotes valides (dont {len(today_matches)} pour aujourd'hui)")
+            if not today_matches:
+                print(f"❌ Aucun match trouvé pour aujourd'hui")
+                return []
+
+            # Trier les matchs par priorité (ligues importantes d'abord) puis par heure
+            today_matches.sort(key=lambda x: (-x.priority, x.commence_time))
             
-            # PREMIÈRE STRATÉGIE: utiliser les matchs d'aujourd'hui en priorité
-            if len(today_matches) >= self.config.MAX_MATCHES:
-                matches = today_matches
-                print(f"✅ Suffisamment de matchs pour aujourd'hui ({len(today_matches)})")
-            else:
-                # STRATÉGIE DE SECOURS: inclure des matchs proches dans le temps
-                print(f"⚠️ Pas assez de matchs aujourd'hui ({len(today_matches)}). Inclusion de matchs proches...")
-                
-                # Trier tous les matchs valides par date
-                valid_matches.sort(key=lambda x: x.commence_time)
-                
-                # Prendre d'abord tous les matchs d'aujourd'hui
-                matches = today_matches.copy()
-                
-                # Ajouter des matchs des prochains jours jusqu'à avoir au moins MAX_MATCHES
-                remaining = [m for m in valid_matches if m not in today_matches]
-                matches.extend(remaining[:self.config.MAX_MATCHES - len(matches)])
-            
-            # Tri final par priorité et heure
-            matches.sort(key=lambda x: (-x.priority, x.commence_time))
-            top_matches = matches[:min(30, len(matches))]
-            
-            print(f"\n✅ {len(top_matches)} matchs sélectionnés pour analyse")
-            for i, match in enumerate(top_matches[:10]):
-                match_day = match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%d/%m")
+            print(f"\n✅ {len(today_matches)} matchs disponibles pour aujourd'hui")
+            for i, match in enumerate(today_matches[:10]):  # Afficher max 10 premiers matchs
                 match_time = match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M")
-                print(f"{i+1}. {match_day} {match_time} - {match.home_team} vs {match.away_team} ({match.competition})")
+                print(f"{i+1}. {match_time} - {match.home_team} vs {match.away_team} ({match.competition})")
                 
-            return top_matches
+            return today_matches
 
         except Exception as e:
             print(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return []
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
@@ -500,31 +480,37 @@ CONFIANCE: [pourcentage]"""
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             
-            # 1. Récupérer TOUS les matchs disponibles
-            all_matches = self.fetch_all_matches()
+            # 1. Récupérer UNIQUEMENT les matchs du jour
+            todays_matches = self.fetch_todays_matches()
             
-            if not all_matches:
-                print("❌ Aucun match trouvé pour aujourd'hui ou les jours proches")
+            if not todays_matches:
+                print("❌ Aucun match trouvé pour aujourd'hui")
                 return
 
-            if len(all_matches) < self.config.MAX_MATCHES:
-                print(f"⚠️ Attention: Seulement {len(all_matches)} matchs disponibles")
-                print("⚠️ Le bot va tenter d'obtenir autant de prédictions que possible")
+            # 2. Vérifier si nous avons assez de matchs pour aujourd'hui
+            if len(todays_matches) < self.config.MAX_MATCHES:
+                print(f"⚠️ Attention: Seulement {len(todays_matches)} matchs disponibles aujourd'hui")
+                print(f"⚠️ Le bot va tenter d'analyser tous les matchs disponibles")
             
-            # 2. Initialiser le traitement
+            # 3. Initialiser les variables pour le traitement
             predictions = []
             processed_indices = set()  # Pour suivre les matchs déjà traités
             
-            # 3. Traiter les matchs un par un jusqu'à avoir 5 prédictions
+            # 4. Traiter les matchs un par un jusqu'à avoir 5 prédictions ou épuiser tous les matchs
             match_index = 0
-            while len(predictions) < self.config.MAX_MATCHES and match_index < len(all_matches):
+            while len(predictions) < self.config.MAX_MATCHES and match_index < len(todays_matches):
+                if match_index in processed_indices:
+                    match_index += 1
+                    continue
+                
                 # Sélectionner le match courant
-                current_match = all_matches[match_index]
-                match_time = current_match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%d/%m %H:%M")
+                current_match = todays_matches[match_index]
+                processed_indices.add(match_index)
+                match_time = current_match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M")
                 
-                print(f"\n⏳ MATCH {match_index+1}/{len(all_matches)}: {current_match.home_team} vs {current_match.away_team} ({match_time})")
+                print(f"\n⏳ MATCH {match_index+1}/{len(todays_matches)}: {current_match.home_team} vs {current_match.away_team} ({match_time})")
                 
-                # 3.1 Obtenir les scores prédits
+                # 4.1 Obtenir les scores prédits
                 scores = self.get_predicted_scores(current_match)
                 if not scores:
                     print(f"⚠️ Impossible d'obtenir des scores prédits. Passage au match suivant.")
@@ -533,31 +519,31 @@ CONFIANCE: [pourcentage]"""
                 
                 current_match.predicted_score1, current_match.predicted_score2 = scores
                 
-                # 3.2 Obtenir les statistiques
+                # 4.2 Obtenir les statistiques
                 stats = self.get_match_stats(current_match)
                 if not stats:
                     print(f"⚠️ Impossible d'obtenir des statistiques. Passage au match suivant.")
                     match_index += 1
                     continue
                 
-                # 3.3 Analyser le match
+                # 4.3 Analyser le match
                 prediction = self.analyze_match(current_match, stats)
                 if not prediction:
                     print(f"⚠️ Analyse non concluante. Passage au match suivant.")
                     match_index += 1
                     continue
                 
-                # 3.4 Ajouter la prédiction et passer au match suivant
+                # 4.4 Ajouter la prédiction et passer au match suivant
                 predictions.append(prediction)
                 print(f"✅ Prédiction {len(predictions)}/{self.config.MAX_MATCHES} obtenue")
                 match_index += 1
                 
-                # Pause entre les matchs
-                if len(predictions) < self.config.MAX_MATCHES and match_index < len(all_matches):
+                # Pause entre les matchs pour éviter de surcharger les API
+                if len(predictions) < self.config.MAX_MATCHES and match_index < len(todays_matches):
                     await asyncio.sleep(3)
             
-            # 4. Bilan et envoi
-            print(f"\n📊 {match_index}/{len(all_matches)} matchs traités, {len(predictions)}/{self.config.MAX_MATCHES} prédictions obtenues")
+            # 5. Bilan et envoi
+            print(f"\n📊 {len(processed_indices)}/{len(todays_matches)} matchs traités, {len(predictions)}/{self.config.MAX_MATCHES} prédictions obtenues")
             
             if len(predictions) == self.config.MAX_MATCHES:
                 print(f"✅ Nombre exact de prédictions atteint")
