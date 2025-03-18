@@ -537,158 +537,158 @@ CONFIANCE: [pourcentage]"""
             )
 
     def _format_predictions_message(self, predictions: List[Prediction]) -> str:
-    # Date du jour formatée
-    current_date = datetime.now().strftime('%d/%m/%Y')
-    
-    # En-tête du message avec formatage en gras
-    msg = f"*🤖 AL VE AI BOT - PRÉDICTIONS DU {current_date} 🤖*\n\n"
-    
-    # Vérifier que nous avons exactement le nombre de matchs requis
-    if len(predictions) != self.required_match_count:
-        print(f"⚠️ Nombre de prédictions incorrect: {len(predictions)}/{self.required_match_count}")
-        # Nous ne devrions jamais arriver ici avec le nouveau code
-    
-    for i, pred in enumerate(predictions, 1):
-        # Formatage des éléments avec gras - SANS LES COTES
+        # Date du jour formatée
+        current_date = datetime.now().strftime('%d/%m/%Y')
+        
+        # En-tête du message avec formatage en gras
+        msg = f"*🤖 AL VE AI BOT - PRÉDICTIONS DU {current_date} 🤖*\n\n"
+        
+        # Vérifier que nous avons exactement le nombre de matchs requis
+        if len(predictions) != self.required_match_count:
+            print(f"⚠️ Nombre de prédictions incorrect: {len(predictions)}/{self.required_match_count}")
+            # Nous ne devrions jamais arriver ici avec le nouveau code
+        
+        for i, pred in enumerate(predictions, 1):
+            # Formatage des éléments avec gras - SANS LES COTES
+            msg += (
+                f"*📊 MATCH #{i}*\n"
+                f"🏆 *{pred.competition}*\n"
+                f"*⚔️ {pred.match}*\n"
+                f"⏰ Coup d'envoi : *{pred.time}*\n"
+                f"🔮 Scores prédits : *{pred.predicted_score1}* ou *{pred.predicted_score2}*\n"
+                f"📈 Prédiction : *{pred.prediction}*\n"
+                f"✅ Confiance : *{pred.confidence}%*\n\n"
+                f"{'─' * 20}\n\n"
+            )
+        
+        # Pied de page avec formatage en gras
         msg += (
-            f"*📊 MATCH #{i}*\n"
-            f"🏆 *{pred.competition}*\n"
-            f"*⚔️ {pred.match}*\n"
-            f"⏰ Coup d'envoi : *{pred.time}*\n"
-            f"🔮 Scores prédits : *{pred.predicted_score1}* ou *{pred.predicted_score2}*\n"
-            f"📈 Prédiction : *{pred.prediction}*\n"
-            f"✅ Confiance : *{pred.confidence}%*\n\n"
-            f"{'─' * 20}\n\n"
+            "*⚠️ RAPPEL IMPORTANT :*\n"
+            "• *Pariez de manière responsable*\n"
+            "• *Ne dépassez pas 5% de votre bankroll*\n"
+            "• *Ces prédictions sont basées sur l'analyse de données*"
         )
-    
-    # Pied de page avec formatage en gras
-    msg += (
-        "*⚠️ RAPPEL IMPORTANT :*\n"
-        "• *Pariez de manière responsable*\n"
-        "• *Ne dépassez pas 5% de votre bankroll*\n"
-        "• *Ces prédictions sont basées sur l'analyse de données*"
-    )
-    return msg
+        return msg
 
-# Génère une prédiction de secours si nécessaire
-def generate_fallback_prediction(self, match: Match) -> Prediction:
-    """Génère une prédiction de secours quand toutes les tentatives ont échoué"""
-    print(f"⚠️ Génération d'une prédiction de secours pour {match.home_team} vs {match.away_team}")
-    
-    # Déterminer la prédiction en fonction des cotes
-    if match.home_odds <= 1.40:  # Équipe à domicile très favorite
-        pred = "1"
-        conf = 85
-    elif match.away_odds <= 1.40:  # Équipe à l'extérieur très favorite
-        pred = "2"
-        conf = 85
-    elif match.home_odds < match.away_odds:  # Équipe à domicile légèrement favorite
-        pred = "1X"
-        conf = 80
-    elif match.away_odds < match.home_odds:  # Équipe à l'extérieur légèrement favorite
-        pred = "X2"
-        conf = 80
-    else:  # Match très équilibré
-        # Pour les matchs équilibrés, prédire le nombre de buts est plus sûr
-        pred = "+1.5 buts"
-        conf = 85
-    
-    # Générer des scores probables basés sur les cotes
-    if match.home_odds < match.away_odds:
-        score1 = "2-0"
-        score2 = "2-1"
-    elif match.away_odds < match.home_odds:
-        score1 = "0-2"
-        score2 = "1-2"
-    else:
-        score1 = "1-1"
-        score2 = "2-2"
-    
-    return Prediction(
-        region=match.region,
-        competition=match.competition,
-        match=f"{match.home_team} vs {match.away_team}",
-        time=match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M"),
-        predicted_score1=score1,
-        predicted_score2=score2,
-        prediction=pred,
-        confidence=conf,
-        home_odds=match.home_odds,
-        draw_odds=match.draw_odds,
-        away_odds=match.away_odds
-    )
-
-async def send_predictions(self, predictions: List[Prediction]) -> None:
-    if not predictions:
-        print("❌ Aucune prédiction à envoyer")
-        return
-
-    print("\n5️⃣ ENVOI DES PRÉDICTIONS")
-    
-    # S'assurer que nous avons exactement le nombre requis de prédictions
-    if len(predictions) < self.required_match_count:
-        print(f"⚠️ Nombre insuffisant de prédictions: {len(predictions)}/{self.required_match_count}")
-        print("⚠️ Ce cas ne devrait jamais se produire avec le nouveau code")
-        return
+    # Génère une prédiction de secours si nécessaire
+    def generate_fallback_prediction(self, match: Match) -> Prediction:
+        """Génère une prédiction de secours quand toutes les tentatives ont échoué"""
+        print(f"⚠️ Génération d'une prédiction de secours pour {match.home_team} vs {match.away_team}")
         
-    # Prendre exactement le nombre requis de prédictions
-    final_predictions = predictions[:self.required_match_count]
-    
-    try:
-        message = self._format_predictions_message(final_predictions)
+        # Déterminer la prédiction en fonction des cotes
+        if match.home_odds <= 1.40:  # Équipe à domicile très favorite
+            pred = "1"
+            conf = 85
+        elif match.away_odds <= 1.40:  # Équipe à l'extérieur très favorite
+            pred = "2"
+            conf = 85
+        elif match.home_odds < match.away_odds:  # Équipe à domicile légèrement favorite
+            pred = "1X"
+            conf = 80
+        elif match.away_odds < match.home_odds:  # Équipe à l'extérieur légèrement favorite
+            pred = "X2"
+            conf = 80
+        else:  # Match très équilibré
+            # Pour les matchs équilibrés, prédire le nombre de buts est plus sûr
+            pred = "+1.5 buts"
+            conf = 85
         
-        # Envoyer un message avec formatage Markdown
-        await self.bot.send_message(
-            chat_id=self.config.TELEGRAM_CHAT_ID,
-            text=message,
-            parse_mode="Markdown",  # Activer le formatage Markdown
-            disable_web_page_preview=True
+        # Générer des scores probables basés sur les cotes
+        if match.home_odds < match.away_odds:
+            score1 = "2-0"
+            score2 = "2-1"
+        elif match.away_odds < match.home_odds:
+            score1 = "0-2"
+            score2 = "1-2"
+        else:
+            score1 = "1-1"
+            score2 = "2-2"
+        
+        return Prediction(
+            region=match.region,
+            competition=match.competition,
+            match=f"{match.home_team} vs {match.away_team}",
+            time=match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M"),
+            predicted_score1=score1,
+            predicted_score2=score2,
+            prediction=pred,
+            confidence=conf,
+            home_odds=match.home_odds,
+            draw_odds=match.draw_odds,
+            away_odds=match.away_odds
         )
-        print(f"✅ Exactement {len(final_predictions)} prédictions envoyées!")
-        
-    except Exception as e:
-        print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
 
-async def run(self) -> None:
-    try:
-        print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
-        all_matches = self.fetch_matches(max_match_count=30)  # Récupérer un grand nombre de matchs candidats
-        if not all_matches:
-            print("❌ Aucun match trouvé pour aujourd'hui")
+    async def send_predictions(self, predictions: List[Prediction]) -> None:
+        if not predictions:
+            print("❌ Aucune prédiction à envoyer")
             return
 
-        predictions = []
-        processed_matches = []
+        print("\n5️⃣ ENVOI DES PRÉDICTIONS")
         
-        # PREMIÈRE PHASE: Traiter les matchs dans l'ordre de priorité
-        print("\n🔄 PHASE 1: Traitement des matchs prioritaires")
-        for idx, match in enumerate(all_matches):
-            # Si nous avons déjà le nombre requis de prédictions, arrêter le traitement
-            if len(predictions) >= self.required_match_count:
-                print(f"✅ Nombre requis de prédictions atteint: {len(predictions)}/{self.required_match_count}")
-                break
+        # S'assurer que nous avons exactement le nombre requis de prédictions
+        if len(predictions) < self.required_match_count:
+            print(f"⚠️ Nombre insuffisant de prédictions: {len(predictions)}/{self.required_match_count}")
+            print("⚠️ Ce cas ne devrait jamais se produire avec le nouveau code")
+            return
             
-            print(f"\n⏳ Traitement du match {idx+1}/{min(len(all_matches), 30)}: {match.home_team} vs {match.away_team}")
+        # Prendre exactement le nombre requis de prédictions
+        final_predictions = predictions[:self.required_match_count]
+        
+        try:
+            message = self._format_predictions_message(final_predictions)
             
-            # Obtenir les deux scores exacts probables
-            scores = self.get_predicted_scores(match)
-            if scores:
-                match.predicted_score1, match.predicted_score2 = scores
-            else:
-                print(f"⚠️ Utilisation de scores par défaut pour {match.home_team} vs {match.away_team}")
-                # Définir des scores par défaut basés sur les cotes
-                if match.home_odds < match.away_odds:
-                    match.predicted_score1, match.predicted_score2 = "2-1", "2-0"
-                elif match.away_odds < match.home_odds:
-                    match.predicted_score1, match.predicted_score2 = "1-2", "0-2"
+            # Envoyer un message avec formatage Markdown
+            await self.bot.send_message(
+                chat_id=self.config.TELEGRAM_CHAT_ID,
+                text=message,
+                parse_mode="Markdown",  # Activer le formatage Markdown
+                disable_web_page_preview=True
+            )
+            print(f"✅ Exactement {len(final_predictions)} prédictions envoyées!")
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
+
+    async def run(self) -> None:
+        try:
+            print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
+            all_matches = self.fetch_matches(max_match_count=30)  # Récupérer un grand nombre de matchs candidats
+            if not all_matches:
+                print("❌ Aucun match trouvé pour aujourd'hui")
+                return
+
+            predictions = []
+            processed_matches = []
+            
+            # PREMIÈRE PHASE: Traiter les matchs dans l'ordre de priorité
+            print("\n🔄 PHASE 1: Traitement des matchs prioritaires")
+            for idx, match in enumerate(all_matches):
+                # Si nous avons déjà le nombre requis de prédictions, arrêter le traitement
+                if len(predictions) >= self.required_match_count:
+                    print(f"✅ Nombre requis de prédictions atteint: {len(predictions)}/{self.required_match_count}")
+                    break
+                
+                print(f"\n⏳ Traitement du match {idx+1}/{min(len(all_matches), 30)}: {match.home_team} vs {match.away_team}")
+                
+                # Obtenir les deux scores exacts probables
+                scores = self.get_predicted_scores(match)
+                if scores:
+                    match.predicted_score1, match.predicted_score2 = scores
                 else:
-                    match.predicted_score1, match.predicted_score2 = "1-1", "2-2"
-            
-            # Obtenir les statistiques
-            stats = self.get_match_stats(match)
-            if not stats:
-                print(f"⚠️ Impossible d'obtenir des statistiques pour {match.home_team} vs {match.away_team}. Utilisation de stats par défaut.")
-                stats = f"""
+                    print(f"⚠️ Utilisation de scores par défaut pour {match.home_team} vs {match.away_team}")
+                    # Définir des scores par défaut basés sur les cotes
+                    if match.home_odds < match.away_odds:
+                        match.predicted_score1, match.predicted_score2 = "2-1", "2-0"
+                    elif match.away_odds < match.home_odds:
+                        match.predicted_score1, match.predicted_score2 = "1-2", "0-2"
+                    else:
+                        match.predicted_score1, match.predicted_score2 = "1-1", "2-2"
+                
+                # Obtenir les statistiques
+                stats = self.get_match_stats(match)
+                if not stats:
+                    print(f"⚠️ Impossible d'obtenir des statistiques pour {match.home_team} vs {match.away_team}. Utilisation de stats par défaut.")
+                    stats = f"""
 FORME RÉCENTE:
 - {match.home_team}: Performances variables récemment
 - {match.away_team}: Performances variables récemment
@@ -706,66 +706,66 @@ STATISTIQUES:
 CONTEXTE:
 - Match important pour les deux équipes
 """
-            
-            # Analyser le match et obtenir une prédiction
-            prediction = self.analyze_match(match, stats)
-            if prediction:
-                predictions.append(prediction)
-                print(f"✅ Prédiction {len(predictions)}/{self.required_match_count} obtenue")
-            else:
-                # Si l'analyse échoue, générer une prédiction de secours
-                prediction = self.generate_fallback_prediction(match)
-                predictions.append(prediction)
-                print(f"⚠️ Prédiction de secours {len(predictions)}/{self.required_match_count} générée")
-            
-            # Ajouter le match aux traités
-            processed_matches.append(match)
-            
-            # Attendre un peu entre chaque analyse pour ne pas surcharger les API
-            await asyncio.sleep(3)
-        
-        # DEUXIÈME PHASE: Si nous n'avons pas assez de prédictions, utiliser des prédictions de secours
-        if len(predictions) < self.required_match_count:
-            print(f"\n⚠️ Nombre insuffisant de prédictions: {len(predictions)}/{self.required_match_count}")
-            print("\n🔄 PHASE 2: Génération de prédictions supplémentaires")
-            
-            # Filtrer les matchs non traités
-            remaining_matches = [m for m in all_matches if m not in processed_matches]
-            
-            # Si nous avons encore des matchs disponibles
-            for match in remaining_matches:
-                if len(predictions) >= self.required_match_count:
-                    break
                 
-                print(f"\n⏳ Traitement forcé du match: {match.home_team} vs {match.away_team}")
+                # Analyser le match et obtenir une prédiction
+                prediction = self.analyze_match(match, stats)
+                if prediction:
+                    predictions.append(prediction)
+                    print(f"✅ Prédiction {len(predictions)}/{self.required_match_count} obtenue")
+                else:
+                    # Si l'analyse échoue, générer une prédiction de secours
+                    prediction = self.generate_fallback_prediction(match)
+                    predictions.append(prediction)
+                    print(f"⚠️ Prédiction de secours {len(predictions)}/{self.required_match_count} générée")
                 
-                # Générer une prédiction de secours sans essayer d'obtenir des données
-                prediction = self.generate_fallback_prediction(match)
-                predictions.append(prediction)
-                print(f"⚠️ Prédiction forcée {len(predictions)}/{self.required_match_count} générée")
+                # Ajouter le match aux traités
+                processed_matches.append(match)
                 
-                # Court délai entre les traitements
-                await asyncio.sleep(1)
-        
-        # VÉRIFICATION FINALE: S'assurer que nous avons exactement le nombre requis de prédictions
-        if len(predictions) < self.required_match_count:
-            print(f"\n⚠️ ALERTE! Impossible d'obtenir {self.required_match_count} prédictions. Seulement {len(predictions)} générées.")
-            print("⚠️ Ce cas ne devrait jamais se produire avec le nombre élevé de matchs récupérés.")
-            # Ne pas envoyer de message si nous n'avons pas le nombre requis
-            return
-        elif len(predictions) > self.required_match_count:
-            # Garder uniquement le nombre requis de prédictions
-            print(f"\n✂️ Réduction du nombre de prédictions: {len(predictions)} -> {self.required_match_count}")
-            predictions = predictions[:self.required_match_count]
-        
-        print(f"\n📊 BILAN: Exactement {len(predictions)}/{self.required_match_count} prédictions prêtes à être envoyées")
-        
-        # Envoyer les prédictions
-        await self.send_predictions(predictions)
-        print("=== ✅ EXÉCUTION TERMINÉE ===")
+                # Attendre un peu entre chaque analyse pour ne pas surcharger les API
+                await asyncio.sleep(3)
+            
+            # DEUXIÈME PHASE: Si nous n'avons pas assez de prédictions, utiliser des prédictions de secours
+            if len(predictions) < self.required_match_count:
+                print(f"\n⚠️ Nombre insuffisant de prédictions: {len(predictions)}/{self.required_match_count}")
+                print("\n🔄 PHASE 2: Génération de prédictions supplémentaires")
+                
+                # Filtrer les matchs non traités
+                remaining_matches = [m for m in all_matches if m not in processed_matches]
+                
+                # Si nous avons encore des matchs disponibles
+                for match in remaining_matches:
+                    if len(predictions) >= self.required_match_count:
+                        break
+                    
+                    print(f"\n⏳ Traitement forcé du match: {match.home_team} vs {match.away_team}")
+                    
+                    # Générer une prédiction de secours sans essayer d'obtenir des données
+                    prediction = self.generate_fallback_prediction(match)
+                    predictions.append(prediction)
+                    print(f"⚠️ Prédiction forcée {len(predictions)}/{self.required_match_count} générée")
+                    
+                    # Court délai entre les traitements
+                    await asyncio.sleep(1)
+            
+            # VÉRIFICATION FINALE: S'assurer que nous avons exactement le nombre requis de prédictions
+            if len(predictions) < self.required_match_count:
+                print(f"\n⚠️ ALERTE! Impossible d'obtenir {self.required_match_count} prédictions. Seulement {len(predictions)} générées.")
+                print("⚠️ Ce cas ne devrait jamais se produire avec le nombre élevé de matchs récupérés.")
+                # Ne pas envoyer de message si nous n'avons pas le nombre requis
+                return
+            elif len(predictions) > self.required_match_count:
+                # Garder uniquement le nombre requis de prédictions
+                print(f"\n✂️ Réduction du nombre de prédictions: {len(predictions)} -> {self.required_match_count}")
+                predictions = predictions[:self.required_match_count]
+            
+            print(f"\n📊 BILAN: Exactement {len(predictions)}/{self.required_match_count} prédictions prêtes à être envoyées")
+            
+            # Envoyer les prédictions
+            await self.send_predictions(predictions)
+            print("=== ✅ EXÉCUTION TERMINÉE ===")
 
-    except Exception as e:
-        print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
+        except Exception as e:
+            print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
 
 async def send_test_message(bot, chat_id):
     """Envoie un message de test pour vérifier la connectivité avec Telegram"""
