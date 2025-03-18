@@ -13,7 +13,6 @@ from retry import retry
 import pytz  # Pour gérer les fuseaux horaires
 import os   # Pour les variables d'environnement
 import random  # Pour sélectionner des matchs supplémentaires si nécessaire
-import traceback  # Pour des logs d'erreur détaillés
 
 # Configuration de base
 nest_asyncio.apply()
@@ -104,8 +103,7 @@ class BettingBot:
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def fetch_matches(self, max_match_count: int = 30) -> List[Match]:
-        """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent
-           Augmentation à 30 matchs minimum pour garantir suffisamment de candidats"""
+        """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent"""
         print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
@@ -127,8 +125,8 @@ class BettingBot:
 
             for match_data in matches_data:
                 commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
-                # Prendre les matchs des prochaines 36 heures (augmenté de 24h à 36h pour avoir plus de matchs)
-                if 0 < (commence_time - current_time).total_seconds() <= 129600:
+                # Prendre les matchs des prochaines 24 heures
+                if 0 < (commence_time - current_time).total_seconds() <= 86400:
                     competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
                     
                     # Extraire les cotes des bookmakers
@@ -170,12 +168,11 @@ class BettingBot:
             # Trier les matchs par priorité et heure de début
             matches.sort(key=lambda x: (-x.priority, x.commence_time))
             
-            # Prendre plus de matchs que nécessaire pour avoir des alternatives (au moins 3x plus)
-            max_match_count = max(max_match_count, self.config.MIN_PREDICTIONS * 3)
+            # Prendre plus de matchs que nécessaire pour avoir des alternatives
             top_matches = matches[:max_match_count]
             
             print(f"\n✅ {len(top_matches)} matchs candidats sélectionnés")
-            for match in top_matches[:10]:  # Afficher plus de matchs dans les logs
+            for match in top_matches[:5]:
                 print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
                 
             return top_matches
@@ -479,128 +476,129 @@ CONFIANCE: [pourcentage]"""
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             
-            # Récupérer beaucoup plus de matchs que nécessaire pour avoir assez de candidats
+            # Récupérer un grand nombre de matchs pour avoir des alternatives
             all_matches = self.fetch_matches(max_match_count=30)
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
                 return
 
+            # Initialiser la liste des prédictions
             predictions = []
             processed_count = 0
-            retry_attempts = 0
-            max_retries = 2  # Nombre de cycles de tentatives supplémentaires
+            maximum_attempts = len(all_matches)  # Limiter le nombre d'essais au nombre de matchs disponibles
             
-            # Première passe: essayer d'obtenir au moins le minimum requis de prédictions
-            while len(predictions) < self.config.MIN_PREDICTIONS and processed_count < len(all_matches):
-                if processed_count >= len(all_matches):
-                    break
-                    
-                match = all_matches[processed_count]
+            # Continuer jusqu'à obtenir exactement 5 prédictions ou épuiser tous les matchs disponibles
+            while len(predictions) < self.config.MAX_MATCHES and processed_count < maximum_attempts:
+                # Sélectionner le prochain match non traité
+                current_match = all_matches[processed_count]
                 processed_count += 1
                 
-                print(f"\n🔄 Traitement du match {processed_count}/{len(all_matches)}: {match.home_team} vs {match.away_team}")
+                print(f"\n⏳ Traitement du match {processed_count}/{maximum_attempts}: {current_match.home_team} vs {current_match.away_team}")
                 
-                # Obtenir les deux scores exacts probables
-                scores = self.get_predicted_scores(match)
+                # Obtenir les scores prédits
+                scores = self.get_predicted_scores(current_match)
                 if not scores:
-                    print(f"⚠️ Impossible d'obtenir des scores exacts pour {match.home_team} vs {match.away_team}. Match ignoré.")
+                    print(f"⚠️ Impossible d'obtenir des scores exacts pour ce match. Passage au suivant.")
                     continue
                     
-                match.predicted_score1, match.predicted_score2 = scores
+                current_match.predicted_score1, current_match.predicted_score2 = scores
                 
                 # Obtenir les statistiques
-                stats = self.get_match_stats(match)
+                stats = self.get_match_stats(current_match)
                 if not stats:
-                    print(f"⚠️ Impossible d'obtenir des statistiques pour {match.home_team} vs {match.away_team}. Match ignoré.")
+                    print(f"⚠️ Impossible d'obtenir des statistiques pour ce match. Passage au suivant.")
                     continue
                 
                 # Analyser le match et obtenir une prédiction
-                prediction = self.analyze_match(match, stats)
+                prediction = self.analyze_match(current_match, stats)
                 if prediction:
                     predictions.append(prediction)
-                    print(f"✅ Prédiction {len(predictions)}/{self.config.MIN_PREDICTIONS} obtenue")
+                    print(f"✅ Prédiction #{len(predictions)}/{self.config.MAX_MATCHES} obtenue")
+                else:
+                    print(f"⚠️ Aucune prédiction fiable n'a pu être générée pour ce match. Passage au suivant.")
                 
                 # Attendre un peu entre chaque analyse pour ne pas surcharger les API
-                await asyncio.sleep(3)  # Attendre 3 secondes entre chaque match
-                
-                # Vérifier périodiquement si nous avons atteint le nombre requis
-                if len(predictions) >= self.config.MIN_PREDICTIONS:
-                    print(f"✅ Nombre requis de prédictions atteint: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
-                    break
+                if len(predictions) < self.config.MAX_MATCHES and processed_count < maximum_attempts:
+                    await asyncio.sleep(5)  # Attendre 5 secondes entre chaque match
             
-            # Si on n'a toujours pas assez de prédictions, on essaie de ré-analyser certains matchs
-            # qui avaient échoué précédemment
-            while len(predictions) < self.config.MIN_PREDICTIONS and retry_attempts < max_retries:
-                retry_attempts += 1
-                print(f"\n⚠️ Tentative supplémentaire #{retry_attempts} pour atteindre {self.config.MIN_PREDICTIONS} prédictions...")
-                
-                # Prendre d'autres matchs non encore traités
-                remaining_matches = [m for m in all_matches[processed_count:]]
-                random.shuffle(remaining_matches)  # Mélanger pour diversifier
-                
-                for match in remaining_matches[:5]:  # Essayer 5 matchs supplémentaires
-                    processed_count += 1
-                    
-                    print(f"\n🔄 Nouvel essai avec {match.home_team} vs {match.away_team}")
-                    
-                    # Mêmes étapes que précédemment
-                    scores = self.get_predicted_scores(match)
-                    if not scores:
-                        continue
-                        
-                    match.predicted_score1, match.predicted_score2 = scores
-                    
-                    stats = self.get_match_stats(match)
-                    if not stats:
-                        continue
-                    
-                    prediction = self.analyze_match(match, stats)
-                    if prediction:
-                        predictions.append(prediction)
-                        print(f"✅ Prédiction {len(predictions)}/{self.config.MIN_PREDICTIONS} obtenue")
-                    
-                    await asyncio.sleep(3)
-                    
-                    if len(predictions) >= self.config.MIN_PREDICTIONS:
-                        break
+            print(f"\n📊 {processed_count} matchs traités, {len(predictions)} prédictions obtenues")
             
-            print(f"\n📊 BILAN: {processed_count} matchs traités, {len(predictions)} prédictions obtenues")
-            
-            # Si nous n'avons toujours pas le minimum requis, on envoie un message d'alerte
-            if len(predictions) < self.config.MIN_PREDICTIONS:
-                print(f"⚠️ ATTENTION: Seulement {len(predictions)}/{self.config.MIN_PREDICTIONS} prédictions obtenues après plusieurs tentatives")
-                
-                # Envoyer un message d'alerte si moins de prédictions que requis mais au moins une
-                if predictions and len(predictions) > 0:
-                    try:
-                        await self.bot.send_message(
-                            chat_id=self.config.TELEGRAM_CHAT_ID,
-                            text=f"⚠️ *ATTENTION*: Le système n'a pu générer que {len(predictions)} prédictions aujourd'hui au lieu des {self.config.MIN_PREDICTIONS} requises. Les prédictions disponibles seront envoyées.",
-                            parse_mode="Markdown"
-                        )
-                        print("✅ Message d'alerte envoyé")
-                    except Exception as e:
-                        print(f"❌ Erreur lors de l'envoi du message d'alerte: {str(e)}")
-                else:
-                    try:
-                        await self.bot.send_message(
-                            chat_id=self.config.TELEGRAM_CHAT_ID,
-                            text="❌ *ÉCHEC*: Aucune prédiction n'a pu être générée aujourd'hui. Réessayez plus tard.",
-                            parse_mode="Markdown"
-                        )
-                        print("✅ Message d'échec envoyé")
-                    except Exception as e:
-                        print(f"❌ Erreur lors de l'envoi du message d'échec: {str(e)}")
-                    return  # Ne pas continuer si aucune prédiction
-            
-            # Limiter au nombre maximum de prédictions si nécessaire
-            if len(predictions) > self.config.MAX_MATCHES:
-                print(f"ℹ️ Limitation à {self.config.MAX_MATCHES} prédictions maximum")
-                predictions = predictions[:self.config.MAX_MATCHES]
-            
-            # Envoyer les prédictions disponibles tant qu'il y en a au moins une
-            if predictions:
+            # Si nous avons atteint le nombre exact de prédictions demandé
+            if len(predictions) == self.config.MAX_MATCHES:
+                print(f"✅ Nombre requis de prédictions atteint: {len(predictions)}/{self.config.MAX_MATCHES}")
+                # Envoyer les prédictions
                 await self.send_predictions(predictions)
                 print("=== ✅ EXÉCUTION TERMINÉE ===")
+            # Si nous n'avons pas obtenu suffisamment de prédictions mais au moins une
+            elif 0 < len(predictions) < self.config.MAX_MATCHES:
+                print(f"⚠️ Seulement {len(predictions)}/{self.config.MAX_MATCHES} prédictions obtenues")
+                print("⚠️ Envoi des prédictions disponibles...")
+                # Envoyer les prédictions disponibles tout de même
+                await self.send_predictions(predictions)
+                print("=== ⚠️ EXÉCUTION TERMINÉE AVEC AVERTISSEMENT ===")
             else:
                 print("❌ Aucune prédiction fiable n'a pu être générée")
+                print("=== ❌ EXÉCUTION TERMINÉE AVEC ÉCHEC ===")
+
+        except Exception as e:
+            print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
+
+async def send_test_message(bot, chat_id):
+    """Envoie un message de test pour vérifier la connectivité avec Telegram"""
+    try:
+        message = "*🤖 AL VE AI BOT - TEST DE CONNEXION*\n\nLe bot de paris a été déployé avec succès et est prêt à générer des prédictions!"
+        await bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode="Markdown"
+        )
+        print("✅ Message de test envoyé")
+    except Exception as e:
+        print(f"❌ Erreur lors de l'envoi du message de test: {str(e)}")
+
+async def scheduler():
+    print("Démarrage du bot de paris sportifs...")
+    
+    # Configuration à partir des variables d'environnement
+    config = Config(
+        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", "votre_token_telegram"),
+        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", "votre_chat_id"),
+        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", "votre_cle_odds"),
+        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", "votre_cle_perplexity"),
+        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", "votre_cle_claude"),
+        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
+        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
+    )
+    
+    bot = BettingBot(config)
+    
+    # Vérifier si l'exécution immédiate est demandée
+    RUN_ON_STARTUP = os.environ.get("RUN_ON_STARTUP", "true").lower() == "true"
+    
+    # Envoyer un message de test au démarrage
+    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
+    
+    # Exécuter immédiatement si RUN_ON_STARTUP est vrai
+    if RUN_ON_STARTUP:
+        print("Exécution immédiate au démarrage...")
+        await bot.run()
+    
+  # Boucle principale du scheduler
+    while True:
+        # Heure actuelle en Afrique centrale (UTC+1)
+        africa_central_time = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
+        now = datetime.now(africa_central_time)
+        
+        # Exécution planifiée à 7h00
+        if now.hour == 7 and now.minute == 0:
+            print(f"Exécution planifiée du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
+            await bot.run()
+            
+            # Attendre 1 minute pour éviter les exécutions multiples
+            await asyncio.sleep(60)
+        
+        # Attendre 1 minute avant de vérifier à nouveau
+        await asyncio.sleep(60)
+
+if __name__ == "__main__":
+    asyncio.run(scheduler())
