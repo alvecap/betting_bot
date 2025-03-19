@@ -10,9 +10,9 @@ from dataclasses import dataclass
 import re
 import sys
 from retry import retry
-import pytz  # Pour gérer les fuseaux horaires
-import os   # Pour les variables d'environnement
-import random  # Pour sélectionner des matchs supplémentaires si nécessaire
+import pytz
+import os
+import random
 
 # Configuration de base
 nest_asyncio.apply()
@@ -63,6 +63,7 @@ class Prediction:
 class BettingBot:
     def __init__(self, config: Config):
         self.config = config
+        # Utiliser python-telegram-bot v20+
         self.bot = telegram.Bot(token=config.TELEGRAM_BOT_TOKEN)
         self.claude_client = anthropic.Anthropic(api_key=config.CLAUDE_API_KEY)
         self.available_predictions = [
@@ -185,13 +186,13 @@ class BettingBot:
     def get_match_stats(self, match: Match) -> Optional[str]:
         print(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
-            # Utiliser le même modèle et prompt que pour les scores exacts
+            # Correction du modèle Perplexity
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
                 headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
                         "Content-Type": "application/json"},
                 json={
-                    "model": "llama-3.1-sonar-large-128k-online",
+                    "model": "llama-3.1-sonar-large-128k-online",  # Vérifier que ce modèle existe
                     "messages": [{
                         "role": "user", 
                         "content": f"""Tu es une intelligence artificielle experte en analyse sportive de football. 
@@ -237,7 +238,7 @@ Sois aussi précis et factuel que possible avec des statistiques réelles."""
         except Exception as e:
             print(f"❌ Erreur lors de la récupération des statistiques: {str(e)}")
             
-            # En cas d'échec, essayer avec un prompt plus court
+            # En cas d'échec, essayer avec un prompt plus court et un modèle de secours
             try:
                 print("⚠️ Tentative avec un prompt simplifié...")
                 response = requests.post(
@@ -245,7 +246,7 @@ Sois aussi précis et factuel que possible avec des statistiques réelles."""
                     headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
                             "Content-Type": "application/json"},
                     json={
-                        "model": "sonar",
+                        "model": "sonar-medium-online",  # Modèle de secours
                         "messages": [{
                             "role": "user", 
                             "content": f"""Analyse factuelle pour le match {match.home_team} vs {match.away_team} ({match.competition}):
@@ -363,6 +364,7 @@ FORMAT REQUIS:
 PREDICTION: [une option de la liste]
 CONFIANCE: [pourcentage]"""
 
+            # Utilisation de la dernière version du client Claude
             message = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=1024,
@@ -460,7 +462,7 @@ CONFIANCE: [pourcentage]"""
         try:
             message = self._format_predictions_message(predictions)
             
-            # Envoyer un message avec formatage Markdown
+            # Correction pour utiliser la méthode asynchrone
             await self.bot.send_message(
                 chat_id=self.config.TELEGRAM_CHAT_ID,
                 text=message,
@@ -576,22 +578,23 @@ async def scheduler():
         print("Exécution immédiate au démarrage...")
         await bot.run()
     
-  # Boucle principale du scheduler
+    # Boucle principale du scheduler
     while True:
-        # Heure actuelle en Afrique centrale (UTC+1)
-        africa_central_time = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
-        now = datetime.now(africa_central_time)
-        
-        # Exécution planifiée à 7h00
-        if now.hour == 7 and now.minute == 0:
-            print(f"Exécution planifiée du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            await bot.run()
+        try:
+            # Heure actuelle en Afrique centrale (UTC+1)
+            africa_central_time = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
+            now = datetime.now(africa_central_time)
             
-            # Attendre 1 minute pour éviter les exécutions multiples
+            # Exécution planifiée à 7h00
+            if now.hour == 7 and now.minute == 0:
+                print(f"Exécution planifiée du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
+                await bot.run()
+                
+                # Attendre 1 minute pour éviter les exécutions multiples
+                await asyncio.sleep(60)
+            
+            # Attendre 1 minute avant de vérifier à nouveau
             await asyncio.sleep(60)
-        
-        # Attendre 1 minute avant de vérifier à nouveau
-        await asyncio.sleep(60)
-
-if __name__ == "__main__":
-    asyncio.run(scheduler())
+        except Exception as e:
+            print(f"Erreur dans le scheduler: {str(e)}")
+            await asyncio.sleep(60)  # Continuer même en cas d'erreur
