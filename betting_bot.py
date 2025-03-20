@@ -13,7 +13,6 @@ from retry import retry
 import pytz
 import os
 import random
-import time
 
 # Configuration de base
 nest_asyncio.apply()
@@ -29,7 +28,7 @@ class Config:
     PERPLEXITY_API_KEY: str
     CLAUDE_API_KEY: str
     MAX_MATCHES: int = 5
-    MIN_PREDICTIONS: int = 5  # Nombre minimum de prédictions à collecter
+    MIN_PREDICTIONS: int = 5
 
 @dataclass
 class Match:
@@ -186,7 +185,7 @@ class BettingBot:
     def get_match_stats(self, match: Match) -> Optional[str]:
         print(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
-            # Utiliser un prompt amélioré pour obtenir des statistiques plus complètes
+            # Prompt amélioré pour des statistiques plus complètes
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
                 headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
@@ -195,54 +194,52 @@ class BettingBot:
                     "model": "llama-3.1-sonar-large-128k-online",
                     "messages": [{
                         "role": "user", 
-                        "content": f"""Tu es une intelligence artificielle experte en analyse sportive de football avec accès aux données les plus récentes et précises. 
+                        "content": f"""Tu es une intelligence artificielle experte en analyse sportive de football avec accès aux données les plus récentes. 
 
-Fais une analyse ULTRA DÉTAILLÉE et FACTUELLE pour le match {match.home_team} vs {match.away_team} ({match.competition}) qui aura lieu le {match.commence_time.strftime('%d/%m/%Y')}.
+Fais une analyse DÉTAILLÉE et FACTUELLE pour le match {match.home_team} vs {match.away_team} ({match.competition}) qui aura lieu le {match.commence_time.strftime('%d/%m/%Y')}.
 
-Analyse EXHAUSTIVEMENT et avec PRÉCISION tous ces éléments:
+Analyse OBLIGATOIREMENT et avec PRÉCISION tous ces éléments:
 
-1. FORME RÉCENTE (ULTRA DÉTAILLÉE):
-   - 5 derniers matchs de chaque équipe avec scores exacts, contexte et détails de performance
-   - Moyenne précise de buts marqués/encaissés par match (domicile/extérieur/total)
-   - Performance exacte à domicile/extérieur (pourcentage de victoires, nuls, défaites)
+1. FORME RÉCENTE (DÉTAILLÉE):
+   - 5 derniers matchs de chaque équipe avec scores exacts, dates et contexte
+   - Moyenne précise de buts marqués/encaissés par match (domicile/extérieur)
+   - Performance à domicile/extérieur (pourcentage de victoires, nuls, défaites)
    - Tendances récentes des deux équipes (forme ascendante/descendante)
    - Buts marqués/encaissés par mi-temps
 
-2. CONFRONTATIONS DIRECTES (ANALYSE APPROFONDIE):
-   - Les 5 dernières rencontres entre ces équipes avec scores exacts, dates et contexte
-   - Tendances précises des confrontations (équipe dominante, nombre de buts)
-   - Nombre moyen exact de buts dans ces confrontations
-   - Résultats à domicile/extérieur dans les confrontations
+2. CONFRONTATIONS DIRECTES (HISTORIQUE COMPLET):
+   - Les 5 dernières rencontres entre ces équipes avec scores, dates et contexte
+   - Tendances des confrontations (équipe dominante, nombre de buts)
+   - Nombre moyen de buts dans ces confrontations
+   - Résultats à domicile/extérieur dans les confrontations directes
 
-3. STATISTIQUES CLÉS (PRÉCISION MAXIMALE):
+3. STATISTIQUES CLÉS (PRÉCISES):
    - Pourcentage exact de matchs avec +1.5 buts pour chaque équipe
    - Pourcentage exact de matchs avec +2.5 buts pour chaque équipe
    - Pourcentage exact de matchs avec -3.5 buts pour chaque équipe
    - Pourcentage exact de matchs où les deux équipes marquent
-   - Statistiques des buts marqués/encaissés par période de match (15min, 30min, etc.)
    - Statistiques de possession et d'occasions créées
 
 4. ABSENCES ET EFFECTIF (DÉTAILS COMPLETS):
-   - Liste complète des joueurs blessés ou suspendus importants
-   - Impact précis des absences sur le jeu de l'équipe (tactique, efficacité)
-   - Joueurs clés disponibles et leur influence sur les résultats récents
+   - Liste des joueurs blessés ou suspendus importants
+   - Impact des absences sur le jeu de l'équipe
+   - Joueurs clés disponibles et leur influence
    - État de forme des buteurs principaux
 
-5. CONTEXTE DU MATCH (ANALYSE APPROFONDIE):
-   - Enjeu sportif exact (qualification, maintien, position précise au classement)
+5. CONTEXTE DU MATCH (ANALYSE COMPLÈTE):
+   - Enjeu sportif (qualification, maintien, position au classement)
    - Importance du match pour chaque équipe
-   - Contexte mental (pression, dynamique d'équipe)
-   - Facteurs externes (météo prévue, état du terrain, déplacements)
+   - Contexte mental et dynamique d'équipe
+   - Facteurs externes (météo prévue, état du terrain)
    - Tactiques probables des entraîneurs
 
 6. COTES ET PRÉDICTIONS DES EXPERTS:
    - Tendances des cotes et mouvements significatifs
    - Analyse des prédictions d'experts de référence
-   - Consensus des prédictions du marché
 
-Sois absolument précis et factuel. Utilise des statistiques réelles et vérifiables. Ne fais AUCUNE supposition non fondée."""
+Sois absolument précis et factuel avec des statistiques réelles et vérifiables."""
                     }],
-                    "max_tokens": 1200,  # Augmenté pour obtenir plus de détails
+                    "max_tokens": 850,  # Augmenté pour obtenir plus de détails
                     "temperature": 0.1
                 },
                 timeout=90  # Augmenté pour permettre une analyse plus approfondie
@@ -265,19 +262,18 @@ Sois absolument précis et factuel. Utilise des statistiques réelles et vérifi
                         "model": "sonar",
                         "messages": [{
                             "role": "user", 
-                            "content": f"""Analyse factuelle et complète pour le match {match.home_team} vs {match.away_team} ({match.competition}):
+                            "content": f"""Analyse factuelle pour le match {match.home_team} vs {match.away_team} ({match.competition}):
 
 1. Forme récente des deux équipes (résultats des 5 derniers matchs)
-2. Confrontations directes récentes avec scores
+2. Confrontations directes récentes
 3. Statistiques: matchs avec +1.5 buts, +2.5 buts, -3.5 buts
-4. Absences importantes et impact
-5. Enjeu du match et contexte
-6. Cotes et prédictions d'experts"""
+4. Absences importantes
+5. Enjeu du match"""
                         }],
-                        "max_tokens": 700,
+                        "max_tokens": 500,
                         "temperature": 0.1
                     },
-                    timeout=60
+                    timeout=45
                 )
                 response.raise_for_status()
                 stats = response.json()["choices"][0]["message"]["content"]
@@ -289,7 +285,7 @@ Sois absolument précis et factuel. Utilise des statistiques réelles et vérifi
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def get_predicted_scores(self, match: Match) -> Optional[tuple]:
-        """Récupère les scores prédits avec un prompt amélioré, retourne None si impossible d'obtenir des prédictions fiables"""
+        """Récupère les scores prédits avec un prompt amélioré pour des prédictions plus précises"""
         print(f"\n3️⃣ OBTENTION DES SCORES EXACTS PROBABLES POUR {match.home_team} vs {match.away_team}")
         try:
             response = requests.post(
@@ -387,6 +383,7 @@ RÉPONDS UNIQUEMENT AU FORMAT EXACT: "Score 1: X-Y, Score 2: Z-W" où X, Y, Z et
         print(f"\n4️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
         
         try:
+            # Prompt amélioré pour une analyse plus fine et des prédictions plus fiables
             prompt = f"""ANALYSE APPROFONDIE POUR PRÉDICTION DE PARIS: {match.home_team} vs {match.away_team}
 COMPÉTITION: {match.competition}
 SCORES EXACTS PRÉDITS: {match.predicted_score1} et {match.predicted_score2}
@@ -593,3 +590,72 @@ CONFIANCE: [pourcentage précis]"""
 
         except Exception as e:
             print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
+
+async def send_test_message(bot, chat_id):
+    """Envoie un message de test pour vérifier la connectivité avec Telegram"""
+    try:
+        message = "*🤖 AL VE AI BOT - TEST DE CONNEXION*\n\nLe bot de paris a été déployé avec succès et est prêt à générer des prédictions!"
+        await bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode="Markdown"
+        )
+        print("✅ Message de test envoyé")
+    except Exception as e:
+        print(f"❌ Erreur lors de l'envoi du message de test: {str(e)}")
+
+async def run_once():
+    """Exécute le bot une seule fois, pour les exécutions via Render cron job"""
+    print("Démarrage du bot de paris sportifs en mode exécution unique...")
+    
+    # Configuration à partir des variables d'environnement
+    config = Config(
+        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
+        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
+        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
+        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
+        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
+        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
+    )
+    
+    bot = BettingBot(config)
+    
+    # Envoyer un message de test
+    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
+    
+    # Exécuter le bot
+    await bot.run()
+    
+    print("Exécution terminée.")
+
+async def main():
+    """Fonction principale qui détermine comment exécuter le bot"""
+    # Vérifier si nous sommes sur Render (environnement cloud)
+    is_render = "RENDER" in os.environ
+    
+    # Si nous sommes sur Render, exécuter une seule fois
+    if is_render:
+        await run_once()
+        return
+    
+    # Pour les tests locaux, exécuter le bot continuellement
+    print("Mode d'exécution locale activé")
+    config = Config(
+        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
+        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
+        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
+        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
+        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
+        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
+    )
+    
+    bot = BettingBot(config)
+    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
+    
+    # Exécuter le bot une fois
+    await bot.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
