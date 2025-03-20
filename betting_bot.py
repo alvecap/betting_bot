@@ -13,6 +13,7 @@ from retry import retry
 import pytz
 import os
 import random
+import time
 
 # Configuration de base
 nest_asyncio.apply()
@@ -28,7 +29,7 @@ class Config:
     PERPLEXITY_API_KEY: str
     CLAUDE_API_KEY: str
     MAX_MATCHES: int = 5
-    MIN_PREDICTIONS: int = 5
+    MIN_PREDICTIONS: int = 5  # Nombre minimum de prédictions à collecter
 
 @dataclass
 class Match:
@@ -185,7 +186,7 @@ class BettingBot:
     def get_match_stats(self, match: Match) -> Optional[str]:
         print(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
-            # Utiliser le même modèle et prompt que pour les scores exacts
+            # Utiliser un prompt amélioré pour obtenir des statistiques plus complètes
             response = requests.post(
                 "https://api.perplexity.ai/chat/completions",
                 headers={"Authorization": f"Bearer {self.config.PERPLEXITY_API_KEY}",
@@ -194,41 +195,57 @@ class BettingBot:
                     "model": "llama-3.1-sonar-large-128k-online",
                     "messages": [{
                         "role": "user", 
-                        "content": f"""Tu es une intelligence artificielle experte en analyse sportive de football. 
+                        "content": f"""Tu es une intelligence artificielle experte en analyse sportive de football avec accès aux données les plus récentes et précises. 
 
-Fais une analyse détaillée et factuelle pour le match {match.home_team} vs {match.away_team} ({match.competition}) qui aura lieu le {match.commence_time.strftime('%d/%m/%Y')}.
+Fais une analyse ULTRA DÉTAILLÉE et FACTUELLE pour le match {match.home_team} vs {match.away_team} ({match.competition}) qui aura lieu le {match.commence_time.strftime('%d/%m/%Y')}.
 
-Analyse OBLIGATOIREMENT tous ces éléments:
-1. FORME RÉCENTE:
-   - 5 derniers matchs de chaque équipe avec les résultats exacts
-   - Moyenne de buts marqués/encaissés par match
-   - Performance à domicile/extérieur (pourcentage de victoires)
+Analyse EXHAUSTIVEMENT et avec PRÉCISION tous ces éléments:
 
-2. CONFRONTATIONS DIRECTES:
-   - Les 5 dernières rencontres entre ces équipes avec scores
-   - Tendances des confrontations (équipe dominante)
-   - Nombre moyen de buts dans ces confrontations
+1. FORME RÉCENTE (ULTRA DÉTAILLÉE):
+   - 5 derniers matchs de chaque équipe avec scores exacts, contexte et détails de performance
+   - Moyenne précise de buts marqués/encaissés par match (domicile/extérieur/total)
+   - Performance exacte à domicile/extérieur (pourcentage de victoires, nuls, défaites)
+   - Tendances récentes des deux équipes (forme ascendante/descendante)
+   - Buts marqués/encaissés par mi-temps
 
-3. STATISTIQUES CLÉS:
-   - Pourcentage de matchs avec +1.5 buts pour chaque équipe
-   - Pourcentage de matchs avec +2.5 buts pour chaque équipe
-   - Pourcentage de matchs avec -3.5 buts pour chaque équipe
-   - Pourcentage de matchs où les deux équipes marquent
+2. CONFRONTATIONS DIRECTES (ANALYSE APPROFONDIE):
+   - Les 5 dernières rencontres entre ces équipes avec scores exacts, dates et contexte
+   - Tendances précises des confrontations (équipe dominante, nombre de buts)
+   - Nombre moyen exact de buts dans ces confrontations
+   - Résultats à domicile/extérieur dans les confrontations
 
-4. ABSENCES ET EFFECTIF:
-   - Joueurs blessés ou suspendus importants
-   - Impact des absences sur le jeu de l'équipe
+3. STATISTIQUES CLÉS (PRÉCISION MAXIMALE):
+   - Pourcentage exact de matchs avec +1.5 buts pour chaque équipe
+   - Pourcentage exact de matchs avec +2.5 buts pour chaque équipe
+   - Pourcentage exact de matchs avec -3.5 buts pour chaque équipe
+   - Pourcentage exact de matchs où les deux équipes marquent
+   - Statistiques des buts marqués/encaissés par période de match (15min, 30min, etc.)
+   - Statistiques de possession et d'occasions créées
 
-5. CONTEXTE DU MATCH:
-   - Enjeu sportif (qualification, maintien, position au classement)
+4. ABSENCES ET EFFECTIF (DÉTAILS COMPLETS):
+   - Liste complète des joueurs blessés ou suspendus importants
+   - Impact précis des absences sur le jeu de l'équipe (tactique, efficacité)
+   - Joueurs clés disponibles et leur influence sur les résultats récents
+   - État de forme des buteurs principaux
+
+5. CONTEXTE DU MATCH (ANALYSE APPROFONDIE):
+   - Enjeu sportif exact (qualification, maintien, position précise au classement)
    - Importance du match pour chaque équipe
+   - Contexte mental (pression, dynamique d'équipe)
+   - Facteurs externes (météo prévue, état du terrain, déplacements)
+   - Tactiques probables des entraîneurs
 
-Sois aussi précis et factuel que possible avec des statistiques réelles."""
+6. COTES ET PRÉDICTIONS DES EXPERTS:
+   - Tendances des cotes et mouvements significatifs
+   - Analyse des prédictions d'experts de référence
+   - Consensus des prédictions du marché
+
+Sois absolument précis et factuel. Utilise des statistiques réelles et vérifiables. Ne fais AUCUNE supposition non fondée."""
                     }],
-                    "max_tokens": 700,
+                    "max_tokens": 1200,  # Augmenté pour obtenir plus de détails
                     "temperature": 0.1
                 },
-                timeout=60  # 1 minute pour obtenir les statistiques
+                timeout=90  # Augmenté pour permettre une analyse plus approfondie
             )
             response.raise_for_status()
             stats = response.json()["choices"][0]["message"]["content"]
@@ -248,18 +265,19 @@ Sois aussi précis et factuel que possible avec des statistiques réelles."""
                         "model": "sonar",
                         "messages": [{
                             "role": "user", 
-                            "content": f"""Analyse factuelle pour le match {match.home_team} vs {match.away_team} ({match.competition}):
+                            "content": f"""Analyse factuelle et complète pour le match {match.home_team} vs {match.away_team} ({match.competition}):
 
 1. Forme récente des deux équipes (résultats des 5 derniers matchs)
-2. Confrontations directes récentes
+2. Confrontations directes récentes avec scores
 3. Statistiques: matchs avec +1.5 buts, +2.5 buts, -3.5 buts
-4. Absences importantes
-5. Enjeu du match"""
+4. Absences importantes et impact
+5. Enjeu du match et contexte
+6. Cotes et prédictions d'experts"""
                         }],
-                        "max_tokens": 500,
+                        "max_tokens": 700,
                         "temperature": 0.1
                     },
-                    timeout=45
+                    timeout=60
                 )
                 response.raise_for_status()
                 stats = response.json()["choices"][0]["message"]["content"]
@@ -269,9 +287,9 @@ Sois aussi précis et factuel que possible avec des statistiques réelles."""
                 print(f"❌ Erreur lors de la récupération des statistiques simplifiées: {str(e)}")
                 return None
 
-    @retry(tries=2, delay=5, backoff=2, logger=logger)
+    @retry(tries=3, delay=5, backoff=2, logger=logger)
     def get_predicted_scores(self, match: Match) -> Optional[tuple]:
-        """Récupère les scores prédits, retourne None si impossible d'obtenir des prédictions fiables"""
+        """Récupère les scores prédits avec un prompt amélioré, retourne None si impossible d'obtenir des prédictions fiables"""
         print(f"\n3️⃣ OBTENTION DES SCORES EXACTS PROBABLES POUR {match.home_team} vs {match.away_team}")
         try:
             response = requests.post(
@@ -282,22 +300,57 @@ Sois aussi précis et factuel que possible avec des statistiques réelles."""
                     "model": "llama-3.1-sonar-large-128k-online",
                     "messages": [{
                         "role": "user", 
-                        "content": f"""Tu es une intelligence artificielle experte en paris sportifs, spécialisée dans la prédiction de scores exacts. Tu utilises des modèles statistiques avancés, y compris la méthode ELO, pour évaluer la force relative des équipes et estimer le nombre de buts potentiels de chaque équipe dans un match.
+                        "content": f"""Tu es une intelligence artificielle experte en analyse de football et prédiction de scores exacts, avec accès aux données les plus récentes du monde du football. Tu utilises un système avancé de modélisation statistique qui intègre:
 
-Objectif: Générer deux propositions de scores exacts pour le match {match.home_team} vs {match.away_team} qui aura lieu le {match.commence_time.strftime('%d/%m/%Y')} en {match.competition}.
+1. MÉTHODE ELO AVANCÉE: 
+   - Calcul précis de la force relative de chaque équipe
+   - Prise en compte des performances récentes (pondération exponentielle)
+   - Ajustement pour l'avantage du terrain
 
-Pour générer ces prédictions, analyse les éléments suivants:
-1. Contexte du match (compétition, enjeu, phase du tournoi)
-2. Forme et performances des équipes (5 derniers matchs, buts marqués/encaissés)
-3. Confrontations directes (historique entre les équipes)
-4. Absences et forme des joueurs clés
-5. Analyse avec la méthode ELO et statistiques avancées
-6. Tendances des bookmakers et experts
-7. Facteurs psychologiques et extra-sportifs
+2. MODÈLE DE POISSON:
+   - Distribution de Poisson pour estimer la probabilité de chaque nombre de buts
+   - Analyse des moyennes de buts marqués/encaissés récentes
 
-Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des nombres entiers. Ne donne aucune autre information ou explication."""
+3. ANALYSE CONTEXTUELLE COMPLÈTE:
+   - Importance du match (enjeu sportif, classement, qualification, derby)
+   - Phase de la saison (début, milieu, fin, période chargée)
+   - Contexte de la compétition (championnat, coupe, Europe)
+   - Série en cours (victoires consécutives, défaites, nuls)
+
+4. ANALYSE DES EFFECTIFS:
+   - Joueurs clés absents (blessés, suspendus)
+   - Alignements probables et impact des changements
+   - Retour de joueurs importants
+   - Fatigue (rotation, calendrier chargé)
+
+5. FACTEURS EXTERNES:
+   - Conditions météorologiques prévues (pluie, chaleur, vent)
+   - État du terrain
+   - Déplacements (distance, décalage horaire)
+   - Affluence et atmosphère (domicile/extérieur/neutre)
+
+6. STYLE DE JEU ET TACTIQUES:
+   - Compatibilité des styles de jeu
+   - Approche tactique probable des entraîneurs
+   - Adaptation tactique selon la forme récente
+
+7. TENDANCES HISTORIQUES:
+   - Confrontations directes récentes (5 derniers matchs)
+   - Performance des équipes en fonction du contexte similaire
+   - Tendances de buts par période (1ère/2ème mi-temps)
+
+8. ANALYSE DES COTES:
+   - Mouvements significatifs des cotes
+   - Consensus des bookmakers
+   - Écarts notables entre cotes théoriques et cotes réelles
+
+OBJECTIF: Générer DEUX propositions de scores exacts pour le match {match.home_team} vs {match.away_team} ({match.competition}) prévu le {match.commence_time.strftime('%d/%m/%Y')}.
+
+Ces scores doivent refléter l'issue la plus probable du match selon ton analyse complète. Utilise TOUTES les données mentionnées ci-dessus pour une prédiction précise.
+
+RÉPONDS UNIQUEMENT AU FORMAT EXACT: "Score 1: X-Y, Score 2: Z-W" où X, Y, Z et W sont des nombres entiers. Ne donne AUCUNE autre information ou explication."""
                     }],
-                    "max_tokens": 100,
+                    "max_tokens": 150,
                     "temperature": 0.1
                 },
                 timeout=120  # 2 minutes pour les scores exacts
@@ -334,39 +387,44 @@ Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des 
         print(f"\n4️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
         
         try:
-            prompt = f"""ANALYSE APPROFONDIE: {match.home_team} vs {match.away_team}
+            prompt = f"""ANALYSE APPROFONDIE POUR PRÉDICTION DE PARIS: {match.home_team} vs {match.away_team}
 COMPÉTITION: {match.competition}
 SCORES EXACTS PRÉDITS: {match.predicted_score1} et {match.predicted_score2}
 COTES: Victoire {match.home_team}: {match.home_odds}, Match nul: {match.draw_odds}, Victoire {match.away_team}: {match.away_odds}
 
-DONNÉES STATISTIQUES:
+DONNÉES STATISTIQUES COMPLÈTES:
 {stats}
 
-CONSIGNES STRICTES:
-1. Analyser en profondeur les statistiques fournies et les scores exacts prédits
-2. Évaluer les tendances et performances des équipes
-3. Considérer les scores exacts prédits par les experts
-4. Choisir la prédiction LA PLUS SÛRE parmi: {', '.join(self.available_predictions)}
+CONSIGNES D'ANALYSE AVANCÉE:
+1. Analyser MÉTICULEUSEMENT les statistiques fournies et les scores exacts prédits
+2. Évaluer les tendances historiques et performances récentes avec PRÉCISION
+3. Considérer le CONTEXTE COMPLET du match (enjeu, classement, motivation)
+4. Analyser l'IMPACT des absences et retours sur l'équilibre des forces
+5. Prendre en compte les FACTEURS EXTERNES (météo, terrain, déplacement)
+6. Évaluer la COMPATIBILITÉ DES STYLES de jeu des deux équipes
+7. Considérer la FIABILITÉ HISTORIQUE des équipes pour maintenir un résultat
+8. Choisir la prédiction LA PLUS SÛRE possible parmi: {', '.join(self.available_predictions)}
 
-RÈGLES DE VÉRIFICATION OBLIGATOIRES:
-- Pour prédire une victoire à domicile "1", l'équipe à domicile doit avoir une cote MAXIMALE de 1.50
-- Pour prédire une victoire à l'extérieur "2", l'équipe extérieure doit avoir une cote MAXIMALE de 1.50
+RÈGLES DE VÉRIFICATION STRICTES:
+- Pour prédire une victoire à domicile "1", l'équipe à domicile doit avoir une cote MAXIMALE de 1.50 ET une forme récente excellente
+- Pour prédire une victoire à l'extérieur "2", l'équipe extérieure doit avoir une cote MAXIMALE de 1.50 ET une forme récente excellente
 - Si la cote est supérieure à 1.50, NE PAS prédire de victoire directe; préférer double chance (1X ou X2)
-- Pour prédire "+1.5 buts", on doit être sûr à 90% que le match aura AU MOINS 3 BUTS
-- Pour prédire "+2.5 buts", on doit être sûr à 90% que le match aura AU MOINS 4 BUTS
-- Pour prédire "-3.5 buts", la probabilité doit être d'au moins 80% que le match aura moins de 4 buts
-- Ne jamais donner de prédiction sans une confiance d'au moins 80%
+- Pour prédire "+1.5 buts", il faut être sûr à 90% que le match aura AU MOINS 2 BUTS
+- Pour prédire "+2.5 buts", il faut être sûr à 90% que le match aura AU MOINS 3 BUTS
+- Pour prédire "-3.5 buts", la probabilité doit être d'au moins 85% que le match aura MOINS DE 4 BUTS
+- Exiger une confiance d'au moins 85% pour TOUTE prédiction
 - Le match nul "X" n'est PAS une option de prédiction acceptable
-- Privilégier les prédictions avec les statistiques les plus solides
+- Privilégier les prédictions avec les statistiques les plus SOLIDES et COHÉRENTES
+- En cas de doute, préférer une prédiction plus conservatrice
 
-FORMAT REQUIS:
-PREDICTION: [une option de la liste]
-CONFIANCE: [pourcentage]"""
+FORMAT DE RÉPONSE REQUIS:
+PREDICTION: [une option UNIQUE de la liste]
+CONFIANCE: [pourcentage précis]"""
 
             message = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=1024,
-                temperature=0.5,
+                temperature=0.1,  # Réduit pour plus de cohérence
                 messages=[{"role": "user", "content": prompt}]
             )
 
@@ -535,72 +593,3 @@ CONFIANCE: [pourcentage]"""
 
         except Exception as e:
             print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
-
-async def send_test_message(bot, chat_id):
-    """Envoie un message de test pour vérifier la connectivité avec Telegram"""
-    try:
-        message = "*🤖 AL VE AI BOT - TEST DE CONNEXION*\n\nLe bot de paris a été déployé avec succès et est prêt à générer des prédictions!"
-        await bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            parse_mode="Markdown"
-        )
-        print("✅ Message de test envoyé")
-    except Exception as e:
-        print(f"❌ Erreur lors de l'envoi du message de test: {str(e)}")
-
-async def run_once():
-    """Exécute le bot une seule fois, pour les exécutions via Render cron job"""
-    print("Démarrage du bot de paris sportifs en mode exécution unique...")
-    
-    # Configuration à partir des variables d'environnement
-    config = Config(
-        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
-        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
-        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
-        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
-        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
-        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
-        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
-    )
-    
-    bot = BettingBot(config)
-    
-    # Envoyer un message de test
-    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
-    
-    # Exécuter le bot
-    await bot.run()
-    
-    print("Exécution terminée.")
-
-async def main():
-    """Fonction principale qui détermine comment exécuter le bot"""
-    # Vérifier si nous sommes sur Render (environnement cloud)
-    is_render = "RENDER" in os.environ
-    
-    # Si nous sommes sur Render, exécuter une seule fois
-    if is_render:
-        await run_once()
-        return
-    
-    # Pour les tests locaux, exécuter le bot continuellement
-    print("Mode d'exécution locale activé")
-    config = Config(
-        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
-        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
-        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
-        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
-        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
-        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
-        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
-    )
-    
-    bot = BettingBot(config)
-    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
-    
-    # Exécuter le bot une fois
-    await bot.run()
-
-if __name__ == "__main__":
-    asyncio.run(main())
