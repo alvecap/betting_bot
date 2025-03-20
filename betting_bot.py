@@ -10,15 +10,30 @@ from dataclasses import dataclass
 import re
 import sys
 from retry import retry
-import pytz  # Pour gérer les fuseaux horaires
-import os   # Pour les variables d'environnement
-import random  # Pour sélectionner des matchs supplémentaires si nécessaire
+import pytz
+import os
+import random
+import signal
 
 # Configuration de base
 nest_asyncio.apply()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', 
                    handlers=[logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger(__name__)
+
+# Variable pour contrôler la boucle principale
+running = True
+
+# Gestionnaire de signaux pour arrêter proprement
+def signal_handler(sig, frame):
+    global running
+    logger.info("Signal reçu, arrêt en cours...")
+    print("Signal reçu, arrêt en cours...")
+    running = False
+
+# Enregistrer les gestionnaires de signaux
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 @dataclass
 class Config:
@@ -84,6 +99,7 @@ class BettingBot:
             "Championnat des Pays-Bas de Football 🇳🇱": 2,
             "Championnat du Portugal de Football 🇵🇹": 2
         }
+        logger.info("Bot initialisé!")
         print("Bot initialisé!")
 
     def _get_league_name(self, competition: str) -> str:
@@ -104,6 +120,7 @@ class BettingBot:
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def fetch_matches(self, max_match_count: int = 15) -> List[Match]:
         """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent"""
+        logger.info("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
@@ -118,6 +135,7 @@ class BettingBot:
             response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
             matches_data = response.json()
+            logger.info(f"✅ {len(matches_data)} matchs récupérés")
             print(f"✅ {len(matches_data)} matchs récupérés")
 
             current_time = datetime.now(timezone.utc)
@@ -171,18 +189,22 @@ class BettingBot:
             # Prendre plus de matchs que nécessaire pour avoir des alternatives
             top_matches = matches[:max_match_count]
             
+            logger.info(f"\n✅ {len(top_matches)} matchs candidats sélectionnés")
             print(f"\n✅ {len(top_matches)} matchs candidats sélectionnés")
             for match in top_matches[:5]:
+                logger.info(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
                 print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
                 
             return top_matches
 
         except Exception as e:
+            logger.error(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
             print(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
             return []
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def get_match_stats(self, match: Match) -> Optional[str]:
+        logger.info(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         print(f"\n2️⃣ ANALYSE DE {match.home_team} vs {match.away_team}")
         try:
             # Utiliser le même modèle et prompt que pour les scores exacts
@@ -232,13 +254,16 @@ Sois aussi précis et factuel que possible avec des statistiques réelles."""
             )
             response.raise_for_status()
             stats = response.json()["choices"][0]["message"]["content"]
+            logger.info("✅ Statistiques complètes récupérées")
             print("✅ Statistiques complètes récupérées")
             return stats
         except Exception as e:
+            logger.error(f"❌ Erreur lors de la récupération des statistiques: {str(e)}")
             print(f"❌ Erreur lors de la récupération des statistiques: {str(e)}")
             
             # En cas d'échec, essayer avec un prompt plus court
             try:
+                logger.info("⚠️ Tentative avec un prompt simplifié...")
                 print("⚠️ Tentative avec un prompt simplifié...")
                 response = requests.post(
                     "https://api.perplexity.ai/chat/completions",
@@ -263,15 +288,18 @@ Sois aussi précis et factuel que possible avec des statistiques réelles."""
                 )
                 response.raise_for_status()
                 stats = response.json()["choices"][0]["message"]["content"]
+                logger.info("✅ Statistiques basiques récupérées")
                 print("✅ Statistiques basiques récupérées")
                 return stats
             except Exception as e:
+                logger.error(f"❌ Erreur lors de la récupération des statistiques simplifiées: {str(e)}")
                 print(f"❌ Erreur lors de la récupération des statistiques simplifiées: {str(e)}")
                 return None
 
     @retry(tries=2, delay=5, backoff=2, logger=logger)
     def get_predicted_scores(self, match: Match) -> Optional[tuple]:
         """Récupère les scores prédits, retourne None si impossible d'obtenir des prédictions fiables"""
+        logger.info(f"\n3️⃣ OBTENTION DES SCORES EXACTS PROBABLES POUR {match.home_team} vs {match.away_team}")
         print(f"\n3️⃣ OBTENTION DES SCORES EXACTS PROBABLES POUR {match.home_team} vs {match.away_team}")
         try:
             response = requests.post(
@@ -312,6 +340,7 @@ Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des 
             if score1_match and score2_match:
                 score1 = f"{score1_match.group(1)}-{score1_match.group(2)}"
                 score2 = f"{score2_match.group(1)}-{score2_match.group(2)}"
+                logger.info(f"✅ Scores probables obtenus: {score1} et {score2}")
                 print(f"✅ Scores probables obtenus: {score1} et {score2}")
                 return score1, score2
             else:
@@ -320,17 +349,21 @@ Réponds UNIQUEMENT au format "Score 1: X-Y, Score 2: Z-W" où X,Y,Z,W sont des 
                 if len(scores) >= 2:
                     score1 = f"{scores[0][0]}-{scores[0][1]}"
                     score2 = f"{scores[1][0]}-{scores[1][1]}"
+                    logger.info(f"✅ Scores probables extraits: {score1} et {score2}")
                     print(f"✅ Scores probables extraits: {score1} et {score2}")
                     return score1, score2
                 else:
+                    logger.error("❌ Format de scores invalide, match ignoré")
                     print("❌ Format de scores invalide, match ignoré")
                     return None
                 
         except Exception as e:
+            logger.error(f"❌ Erreur lors de l'obtention des scores probables: {str(e)}")
             print(f"❌ Erreur lors de l'obtention des scores probables: {str(e)}")
             return None
 
     def analyze_match(self, match: Match, stats: str) -> Optional[Prediction]:
+        logger.info(f"\n4️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
         print(f"\n4️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
         
         try:
@@ -388,16 +421,20 @@ CONFIANCE: [pourcentage]"""
                     # Vérifications supplémentaires pour la fiabilité
                     # Appliquer les règles strictes pour les victoires directes
                     if pred == "1" and match.home_odds > 1.50:
+                        logger.warning(f"⚠️ Cote domicile trop élevée ({match.home_odds} > 1.50). Conversion en 1X.")
                         print(f"⚠️ Cote domicile trop élevée ({match.home_odds} > 1.50). Conversion en 1X.")
                         pred = "1X"
                     elif pred == "2" and match.away_odds > 1.50:
+                        logger.warning(f"⚠️ Cote extérieur trop élevée ({match.away_odds} > 1.50). Conversion en X2.")
                         print(f"⚠️ Cote extérieur trop élevée ({match.away_odds} > 1.50). Conversion en X2.")
                         pred = "X2"
                     
                     if pred == "X":
+                        logger.warning("⚠️ Prédiction de match nul non autorisée. Prédiction rejetée.")
                         print("⚠️ Prédiction de match nul non autorisée. Prédiction rejetée.")
                         return None
                     
+                    logger.info(f"✅ Prédiction finale: {pred} (Confiance: {conf}%)")
                     print(f"✅ Prédiction finale: {pred} (Confiance: {conf}%)")
                     
                     return Prediction(
@@ -414,10 +451,12 @@ CONFIANCE: [pourcentage]"""
                         away_odds=match.away_odds
                     )
 
+            logger.error("❌ Pas de prédiction fiable")
             print("❌ Pas de prédiction fiable")
             return None
 
         except Exception as e:
+            logger.error(f"❌ Erreur lors de l'analyse avec Claude: {str(e)}")
             print(f"❌ Erreur lors de l'analyse avec Claude: {str(e)}")
             return None
 
@@ -452,9 +491,11 @@ CONFIANCE: [pourcentage]"""
 
     async def send_predictions(self, predictions: List[Prediction]) -> None:
         if not predictions:
+            logger.error("❌ Aucune prédiction à envoyer")
             print("❌ Aucune prédiction à envoyer")
             return
 
+        logger.info("\n5️⃣ ENVOI DES PRÉDICTIONS")
         print("\n5️⃣ ENVOI DES PRÉDICTIONS")
         
         try:
@@ -467,16 +508,20 @@ CONFIANCE: [pourcentage]"""
                 parse_mode="Markdown",  # Activer le formatage Markdown
                 disable_web_page_preview=True
             )
+            logger.info(f"✅ {len(predictions)} prédictions envoyées!")
             print(f"✅ {len(predictions)} prédictions envoyées!")
             
         except Exception as e:
+            logger.error(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
             print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
 
     async def run(self) -> None:
         try:
+            logger.info(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             all_matches = self.fetch_matches()
             if not all_matches:
+                logger.error("❌ Aucun match trouvé pour aujourd'hui")
                 print("❌ Aucun match trouvé pour aujourd'hui")
                 return
 
@@ -495,6 +540,7 @@ CONFIANCE: [pourcentage]"""
                 # Obtenir les deux scores exacts probables
                 scores = self.get_predicted_scores(match)
                 if not scores:
+                    logger.warning(f"⚠️ Impossible d'obtenir des scores exacts pour {match.home_team} vs {match.away_team}. Match ignoré.")
                     print(f"⚠️ Impossible d'obtenir des scores exacts pour {match.home_team} vs {match.away_team}. Match ignoré.")
                     continue
                     
@@ -503,6 +549,7 @@ CONFIANCE: [pourcentage]"""
                 # Obtenir les statistiques
                 stats = self.get_match_stats(match)
                 if not stats:
+                    logger.warning(f"⚠️ Impossible d'obtenir des statistiques pour {match.home_team} vs {match.away_team}. Match ignoré.")
                     print(f"⚠️ Impossible d'obtenir des statistiques pour {match.home_team} vs {match.away_team}. Match ignoré.")
                     continue
                 
@@ -510,17 +557,21 @@ CONFIANCE: [pourcentage]"""
                 prediction = self.analyze_match(match, stats)
                 if prediction:
                     predictions.append(prediction)
+                    logger.info(f"✅ Prédiction {len(predictions)}/{self.config.MAX_MATCHES} obtenue")
                     print(f"✅ Prédiction {len(predictions)}/{self.config.MAX_MATCHES} obtenue")
                 
                 # Attendre un peu entre chaque analyse pour ne pas surcharger les API
                 await asyncio.sleep(5)  # Attendre 5 secondes entre chaque match
             
+            logger.info(f"\n📊 {processed_count} matchs traités, {len(predictions)} prédictions obtenues")
             print(f"\n📊 {processed_count} matchs traités, {len(predictions)} prédictions obtenues")
             
             if predictions:
                 if len(predictions) >= self.config.MIN_PREDICTIONS:
+                    logger.info(f"✅ Nombre requis de prédictions atteint: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
                     print(f"✅ Nombre requis de prédictions atteint: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
                 else:
+                    logger.warning(f"⚠️ Seulement {len(predictions)}/{self.config.MIN_PREDICTIONS} prédictions obtenues")
                     print(f"⚠️ Seulement {len(predictions)}/{self.config.MIN_PREDICTIONS} prédictions obtenues")
                 
                 # Limiter au nombre maximum de prédictions si nécessaire
@@ -529,69 +580,12 @@ CONFIANCE: [pourcentage]"""
                 
                 # Envoyer les prédictions disponibles
                 await self.send_predictions(predictions)
+                logger.info("=== ✅ EXÉCUTION TERMINÉE ===")
                 print("=== ✅ EXÉCUTION TERMINÉE ===")
             else:
+                logger.error("❌ Aucune prédiction fiable n'a pu être générée")
                 print("❌ Aucune prédiction fiable n'a pu être générée")
 
         except Exception as e:
+            logger.error(f"❌ ERREUR GÉNÉRALE: {str(e)}")
             print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
-
-async def send_test_message(bot, chat_id):
-    """Envoie un message de test pour vérifier la connectivité avec Telegram"""
-    try:
-        message = "*🤖 AL VE AI BOT - TEST DE CONNEXION*\n\nLe bot de paris a été déployé avec succès et est prêt à générer des prédictions!"
-        await bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            parse_mode="Markdown"
-        )
-        print("✅ Message de test envoyé")
-    except Exception as e:
-        print(f"❌ Erreur lors de l'envoi du message de test: {str(e)}")
-
-async def scheduler():
-    print("Démarrage du bot de paris sportifs...")
-    
-    # Configuration à partir des variables d'environnement
-    config = Config(
-        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", "votre_token_telegram"),
-        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", "votre_chat_id"),
-        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", "votre_cle_odds"),
-        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", "votre_cle_perplexity"),
-        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", "votre_cle_claude"),
-        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
-        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
-    )
-    
-    bot = BettingBot(config)
-    
-    # Vérifier si l'exécution immédiate est demandée
-    RUN_ON_STARTUP = os.environ.get("RUN_ON_STARTUP", "true").lower() == "true"
-    
-    # Envoyer un message de test au démarrage
-    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
-    
-    # Exécuter immédiatement si RUN_ON_STARTUP est vrai
-    if RUN_ON_STARTUP:
-        print("Exécution immédiate au démarrage...")
-        await bot.run()
-    
-  # Boucle principale du scheduler
-    while True:
-        # Heure actuelle en Afrique centrale (UTC+1)
-        africa_central_time = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
-        now = datetime.now(africa_central_time)
-        
-        # Exécution planifiée à 7h00
-        if now.hour == 7 and now.minute == 0:
-            print(f"Exécution planifiée du bot à {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            await bot.run()
-            
-            # Attendre 1 minute pour éviter les exécutions multiples
-            await asyncio.sleep(60)
-        
-        # Attendre 1 minute avant de vérifier à nouveau
-        await asyncio.sleep(60)
-
-if __name__ == "__main__":
-    asyncio.run(scheduler())
