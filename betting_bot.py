@@ -677,63 +677,50 @@ async def run_once():
 
 async def main():
     """Fonction principale qui détermine comment exécuter le bot"""
-    # Vérifier si nous sommes sur Render (environnement cloud)
-    is_render = "RENDER" in os.environ
-    
-    # Exécution immédiate au démarrage
-    print("Exécution immédiate au démarrage...")
-    config = Config(
-        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
-        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
-        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
-        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
-        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
-        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
-        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
-    )
-    
-    bot = BettingBot(config)
-    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
-    await bot.run()
-    
-    # Si en mode local (non Render), continuer avec le scheduler pour exécution quotidienne
-    if not is_render:
-        print("Mode local détecté - Démarrage du scheduler pour exécution quotidienne à 8h00...")
-        await run_scheduler()
-    else:
-        print("Mode Render détecté - Exécution unique complétée")
-
-async def run_scheduler():
-    """Exécute le bot tous les jours à 8h00 heure d'Afrique centrale"""
-    # Configuration à partir des variables d'environnement
-    config = Config(
-        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
-        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
-        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
-        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
-        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
-        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
-        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
-    )
-    
-    bot = BettingBot(config)
-    
-    # Date du dernier jour d'exécution, pour éviter les exécutions multiples
-    last_execution_day = datetime.now().day
-    
-    # Boucle principale du scheduler
-    while True:
-        try:
+    try:
+        print("Démarrage du bot de paris...")
+        
+        # Configuration à partir des variables d'environnement
+        config = Config(
+            TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+            TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
+            ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
+            PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
+            CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
+            MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
+            MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
+        )
+        
+        # Initialiser le bot
+        bot = BettingBot(config)
+        
+        # Test de connexion
+        await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
+        
+        # Exécution immédiate
+        print("⏰ Exécution immédiate au démarrage...")
+        await bot.run()
+        print("✅ Exécution immédiate terminée")
+        
+        # Initialiser la date du dernier jour d'exécution à aujourd'hui
+        # pour éviter une nouvelle exécution le même jour
+        today = datetime.now().day
+        
+        # Attendre jusqu'à 8h le lendemain
+        print("🕒 Passage en mode attente: prochaine exécution planifiée à 8h00...")
+        
+        # Boucle principale du scheduler
+        while True:
             # Heure actuelle en Afrique centrale (UTC+1)
             africa_central_tz = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
             now = datetime.now(africa_central_tz)
             
-            # Log pour suivre l'activité du scheduler
+            # Log d'activité toutes les heures (pour vérifier que le scheduler fonctionne)
             if now.minute == 0:
                 print(f"Scheduler actif - Heure actuelle: {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC+1)")
             
-            # Exécution planifiée à 8h00, uniquement si on ne l'a pas déjà fait aujourd'hui
-            if now.hour == 8 and now.minute < 10 and now.day != last_execution_day:
+            # Exécution planifiée à 8h00, uniquement si on est un jour différent d'aujourd'hui
+            if now.hour == 8 and now.minute < 10 and now.day != today:
                 print(f"⏰ Exécution planifiée du bot à {now.strftime('%Y-%m-%d %H:%M:%S')} (heure d'Afrique centrale)")
                 
                 # Message de notification de début d'exécution
@@ -745,19 +732,23 @@ async def run_scheduler():
                 
                 # Exécuter le bot
                 await bot.run()
-                last_execution_day = now.day
+                
+                # Mettre à jour la date du jour après l'exécution
+                today = now.day
+                print(f"✅ Exécution terminée. Prochaine exécution prévue demain à 8h00")
                 
                 # Attendre un peu après l'exécution pour éviter les doublons
                 await asyncio.sleep(600)  # 10 minutes
             
             # Vérifier toutes les 30 secondes
             await asyncio.sleep(30)
-            
-        except Exception as e:
-            print(f"❌ Erreur dans la boucle du scheduler: {str(e)}")
-            
-            # En cas d'erreur, attendre avant de réessayer
-            await asyncio.sleep(300)  # 5 minutes
+    
+    except Exception as e:
+        print(f"❌ ERREUR CRITIQUE dans la fonction principale: {str(e)}")
+        traceback.print_exc()
+        
+        # En cas d'erreur critique, attendre avant de quitter
+        await asyncio.sleep(300)  # 5 minutes
 
 if __name__ == "__main__":
     asyncio.run(main())
