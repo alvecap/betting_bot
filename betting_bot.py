@@ -405,14 +405,17 @@ CONSIGNES D'ANALYSE AVANCÉE:
 RÈGLES DE VÉRIFICATION STRICTES:
 - Pour prédire une victoire à domicile "1", l'équipe à domicile doit avoir une cote MAXIMALE de 1.50 ET une forme récente excellente
 - Pour prédire une victoire à l'extérieur "2", l'équipe extérieure doit avoir une cote MAXIMALE de 1.50 ET une forme récente excellente
-- Si la cote est supérieure à 1.50, NE PAS prédire de victoire directe; préférer double chance (1X ou X2)
+- Pour prédire "1X", l'équipe à domicile doit être favorite selon les statistiques ET les scores prédits
+- Pour prédire "X2", l'équipe à l'extérieur doit être favorite selon les statistiques ET les scores prédits
+- Ne JAMAIS donner "X2" si les scores prédits favorisent l'équipe à domicile
+- Ne JAMAIS donner "1X" si les scores prédits favorisent l'équipe à l'extérieur
 - Pour prédire "+1.5 buts", il faut être sûr à 90% que le match aura AU MOINS 2 BUTS
 - Pour prédire "+2.5 buts", il faut être sûr à 90% que le match aura AU MOINS 3 BUTS
 - Pour prédire "-3.5 buts", la probabilité doit être d'au moins 85% que le match aura MOINS DE 4 BUTS
 - Exiger une confiance d'au moins 85% pour TOUTE prédiction
 - Le match nul "X" n'est PAS une option de prédiction acceptable
 - Privilégier les prédictions avec les statistiques les plus SOLIDES et COHÉRENTES
-- En cas de doute, préférer une prédiction plus conservatrice
+- En cas de doute, préférer une prédiction concernant le nombre de buts plutôt qu'une double chance non justifiée
 
 FORMAT DE RÉPONSE REQUIS:
 PREDICTION: [une option UNIQUE de la liste]
@@ -440,14 +443,57 @@ CONFIANCE: [pourcentage précis]"""
                             pred = available_pred
                             break
                     
-                    # Vérifications supplémentaires pour la fiabilité
-                    # Appliquer les règles strictes pour les victoires directes
+                    # Vérifications supplémentaires pour la fiabilité des prédictions
+                    # 1. Vérifier la cohérence des victoires directes avec les cotes
                     if pred == "1" and match.home_odds > 1.50:
                         print(f"⚠️ Cote domicile trop élevée ({match.home_odds} > 1.50). Conversion en 1X.")
                         pred = "1X"
                     elif pred == "2" and match.away_odds > 1.50:
                         print(f"⚠️ Cote extérieur trop élevée ({match.away_odds} > 1.50). Conversion en X2.")
                         pred = "X2"
+                    
+                    # 2. Vérifier la cohérence des doubles chances avec les scores prédits
+                    if pred == "X2":
+                        # Extraire les scores pour vérifier si l'équipe extérieure est réellement favorisée
+                        home_goals1, away_goals1 = map(int, match.predicted_score1.split('-'))
+                        home_goals2, away_goals2 = map(int, match.predicted_score2.split('-'))
+                        
+                        # Si les deux scores prédits favorisent l'équipe à domicile, rejeter X2
+                        if home_goals1 > away_goals1 and home_goals2 > away_goals2:
+                            print(f"⚠️ Incohérence: X2 prédit mais les scores {match.predicted_score1} et {match.predicted_score2} favorisent l'équipe à domicile.")
+                            # Proposer une prédiction alternative sur les buts
+                            total_goals1 = home_goals1 + away_goals1
+                            total_goals2 = home_goals2 + away_goals2
+                            if total_goals1 >= 3 or total_goals2 >= 3:
+                                pred = "+2.5 buts"
+                                print(f"✅ Prédiction ajustée à {pred} pour cohérence avec les scores prédits")
+                            elif total_goals1 >= 2 or total_goals2 >= 2:
+                                pred = "+1.5 buts"
+                                print(f"✅ Prédiction ajustée à {pred} pour cohérence avec les scores prédits")
+                            else:
+                                print("❌ Impossible de trouver une prédiction cohérente. Match ignoré.")
+                                return None
+                    
+                    elif pred == "1X":
+                        # Extraire les scores pour vérifier si l'équipe à domicile est réellement favorisée
+                        home_goals1, away_goals1 = map(int, match.predicted_score1.split('-'))
+                        home_goals2, away_goals2 = map(int, match.predicted_score2.split('-'))
+                        
+                        # Si les deux scores prédits favorisent l'équipe à l'extérieur, rejeter 1X
+                        if home_goals1 < away_goals1 and home_goals2 < away_goals2:
+                            print(f"⚠️ Incohérence: 1X prédit mais les scores {match.predicted_score1} et {match.predicted_score2} favorisent l'équipe à l'extérieur.")
+                            # Proposer une prédiction alternative sur les buts
+                            total_goals1 = home_goals1 + away_goals1
+                            total_goals2 = home_goals2 + away_goals2
+                            if total_goals1 >= 3 or total_goals2 >= 3:
+                                pred = "+2.5 buts"
+                                print(f"✅ Prédiction ajustée à {pred} pour cohérence avec les scores prédits")
+                            elif total_goals1 >= 2 or total_goals2 >= 2:
+                                pred = "+1.5 buts"
+                                print(f"✅ Prédiction ajustée à {pred} pour cohérence avec les scores prédits")
+                            else:
+                                print("❌ Impossible de trouver une prédiction cohérente. Match ignoré.")
+                                return None
                     
                     if pred == "X":
                         print("⚠️ Prédiction de match nul non autorisée. Prédiction rejetée.")
@@ -634,13 +680,8 @@ async def main():
     # Vérifier si nous sommes sur Render (environnement cloud)
     is_render = "RENDER" in os.environ
     
-    # Si nous sommes sur Render, exécuter une seule fois
-    if is_render:
-        await run_once()
-        return
-    
-    # Pour les tests locaux, exécuter le bot continuellement
-    print("Mode d'exécution locale activé")
+    # Exécution immédiate au démarrage
+    print("Exécution immédiate au démarrage...")
     config = Config(
         TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
@@ -653,9 +694,70 @@ async def main():
     
     bot = BettingBot(config)
     await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
-    
-    # Exécuter le bot une fois
     await bot.run()
+    
+    # Si en mode local (non Render), continuer avec le scheduler pour exécution quotidienne
+    if not is_render:
+        print("Mode local détecté - Démarrage du scheduler pour exécution quotidienne à 8h00...")
+        await run_scheduler()
+    else:
+        print("Mode Render détecté - Exécution unique complétée")
+
+async def run_scheduler():
+    """Exécute le bot tous les jours à 8h00 heure d'Afrique centrale"""
+    # Configuration à partir des variables d'environnement
+    config = Config(
+        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
+        ODDS_API_KEY=os.environ.get("ODDS_API_KEY", ""),
+        PERPLEXITY_API_KEY=os.environ.get("PERPLEXITY_API_KEY", ""),
+        CLAUDE_API_KEY=os.environ.get("CLAUDE_API_KEY", ""),
+        MAX_MATCHES=int(os.environ.get("MAX_MATCHES", "5")),
+        MIN_PREDICTIONS=int(os.environ.get("MIN_PREDICTIONS", "5"))
+    )
+    
+    bot = BettingBot(config)
+    
+    # Date du dernier jour d'exécution, pour éviter les exécutions multiples
+    last_execution_day = datetime.now().day
+    
+    # Boucle principale du scheduler
+    while True:
+        try:
+            # Heure actuelle en Afrique centrale (UTC+1)
+            africa_central_tz = pytz.timezone("Africa/Lagos")  # Lagos est en UTC+1
+            now = datetime.now(africa_central_tz)
+            
+            # Log pour suivre l'activité du scheduler
+            if now.minute == 0:
+                print(f"Scheduler actif - Heure actuelle: {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC+1)")
+            
+            # Exécution planifiée à 8h00, uniquement si on ne l'a pas déjà fait aujourd'hui
+            if now.hour == 8 and now.minute < 10 and now.day != last_execution_day:
+                print(f"⏰ Exécution planifiée du bot à {now.strftime('%Y-%m-%d %H:%M:%S')} (heure d'Afrique centrale)")
+                
+                # Message de notification de début d'exécution
+                await bot.bot.send_message(
+                    chat_id=config.TELEGRAM_CHAT_ID,
+                    text="*⏰ GÉNÉRATION DES PRÉDICTIONS*\n\nLes prédictions du jour sont en cours de génération, veuillez patienter...",
+                    parse_mode="Markdown"
+                )
+                
+                # Exécuter le bot
+                await bot.run()
+                last_execution_day = now.day
+                
+                # Attendre un peu après l'exécution pour éviter les doublons
+                await asyncio.sleep(600)  # 10 minutes
+            
+            # Vérifier toutes les 30 secondes
+            await asyncio.sleep(30)
+            
+        except Exception as e:
+            print(f"❌ Erreur dans la boucle du scheduler: {str(e)}")
+            
+            # En cas d'erreur, attendre avant de réessayer
+            await asyncio.sleep(300)  # 5 minutes
 
 if __name__ == "__main__":
     asyncio.run(main())
