@@ -74,6 +74,7 @@ class BettingBot:
             "+0.5 but 1ère mi-temps", "+0.5 but 2ème mi-temps"
         ]
         self.top_leagues = {
+            # Championnats prioritaires (niveau 1)
             "Première Ligue Anglaise 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 1,
             "Championnat d'Espagne de Football 🇪🇸": 1,
             "Championnat d'Allemagne de Football 🇩🇪": 1,
@@ -81,30 +82,90 @@ class BettingBot:
             "Championnat de France de Football 🇫🇷": 1,
             "Ligue des Champions de l'UEFA 🇪🇺": 1,
             "Ligue Europa de l'UEFA 🇪🇺": 1,
+            
+            # Championnats secondaires (niveau 2)
             "Championnat de Belgique de Football 🇧🇪": 2,
             "Championnat des Pays-Bas de Football 🇳🇱": 2,
-            "Championnat du Portugal de Football 🇵🇹": 2
+            "Championnat du Portugal de Football 🇵🇹": 2,
+            "Premier League Russe 🇷🇺": 2,
+            "Super League Suisse 🇨🇭": 2,
+            "Süper Lig Turque 🇹🇷": 2,
+            
+            # Compétitions internationales (niveau 1)
+            "Coupe du Monde FIFA 🌍": 1,
+            "Ligue des Nations UEFA 🇪🇺": 1,
+            "Qualifications Coupe du Monde UEFA 🇪🇺": 1,
+            "Qualifications Coupe du Monde CAF 🌍": 1,
+            "Qualifications Coupe du Monde CONCACAF 🌎": 1,
+            "Qualifications Coupe du Monde CONMEBOL 🌎": 1,
+            "Qualifications Coupe du Monde AFC 🌏": 1,
+            "Qualifications Coupe du Monde OFC 🌏": 1,
+            "Coupe d'Afrique des Nations 🌍": 1,
+            "Copa America 🌎": 1,
+            "Championnat d'Europe UEFA 🇪🇺": 1,
+            
+            # Autres championnats internationaux (niveau 3)
+            "MLS 🇺🇸": 3,
+            "Liga MX 🇲🇽": 3,
+            "J-League 🇯🇵": 3,
+            "K-League 🇰🇷": 3,
+            "A-League 🇦🇺": 3,
+            "Chinese Super League 🇨🇳": 3,
+            "Brasileirão 🇧🇷": 3,
+            "Argentine Primera División 🇦🇷": 3
         }
         print("Bot initialisé!")
 
     def _get_league_name(self, competition: str) -> str:
         league_mappings = {
+            # Grands championnats européens
             "Premier League": "Première Ligue Anglaise 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
             "La Liga": "Championnat d'Espagne de Football 🇪🇸",
             "Bundesliga": "Championnat d'Allemagne de Football 🇩🇪",
             "Serie A": "Championnat d'Italie de Football 🇮🇹",
             "Ligue 1": "Championnat de France de Football 🇫🇷",
+            
+            # Coupes européennes
             "Champions League": "Ligue des Champions de l'UEFA 🇪🇺",
             "Europa League": "Ligue Europa de l'UEFA 🇪🇺",
+            "Conference League": "Ligue Conférence de l'UEFA 🇪🇺",
+            
+            # Championnats européens secondaires
             "Belgian First Division A": "Championnat de Belgique de Football 🇧🇪",
-            "Dutch Eredivisie": "Championnat des Pays-Bas de Football 🇳🇱",
-            "Primeira Liga": "Championnat du Portugal de Football 🇵🇹"
+            "Eredivisie": "Championnat des Pays-Bas de Football 🇳🇱",
+            "Primeira Liga": "Championnat du Portugal de Football 🇵🇹",
+            "Russian Premier League": "Premier League Russe 🇷🇺",
+            "Swiss Super League": "Super League Suisse 🇨🇭",
+            "Turkish Super Lig": "Süper Lig Turque 🇹🇷",
+            
+            # Compétitions internationales
+            "FIFA World Cup": "Coupe du Monde FIFA 🌍",
+            "UEFA Nations League": "Ligue des Nations UEFA 🇪🇺",
+            "UEFA European Championship": "Championnat d'Europe UEFA 🇪🇺",
+            "FIFA World Cup Qualification (UEFA)": "Qualifications Coupe du Monde UEFA 🇪🇺",
+            "FIFA World Cup Qualification (CAF)": "Qualifications Coupe du Monde CAF 🌍",
+            "FIFA World Cup Qualification (CONCACAF)": "Qualifications Coupe du Monde CONCACAF 🌎",
+            "FIFA World Cup Qualification (CONMEBOL)": "Qualifications Coupe du Monde CONMEBOL 🌎",
+            "FIFA World Cup Qualification (AFC)": "Qualifications Coupe du Monde AFC 🌏",
+            "FIFA World Cup Qualification (OFC)": "Qualifications Coupe du Monde OFC 🌏",
+            "Africa Cup of Nations": "Coupe d'Afrique des Nations 🌍",
+            "Copa America": "Copa America 🌎",
+            
+            # Autres championnats internationaux
+            "Major League Soccer": "MLS 🇺🇸",
+            "Liga MX": "Liga MX 🇲🇽",
+            "J League": "J-League 🇯🇵",
+            "K League 1": "K-League 🇰🇷",
+            "A-League": "A-League 🇦🇺",
+            "Chinese Super League": "Chinese Super League 🇨🇳",
+            "Brasileirão": "Brasileirão 🇧🇷",
+            "Argentine Primera División": "Argentine Primera División 🇦🇷"
         }
         return league_mappings.get(competition, competition)
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
-    def fetch_matches(self, max_match_count: int = 15) -> List[Match]:
-        """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent"""
+    def fetch_matches(self, max_match_count: int = 30) -> List[Match]:
+        """Récupère des matchs de football et garantit la sélection du nombre minimum requis"""
         print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
@@ -164,43 +225,55 @@ class BettingBot:
                     ))
 
             if not matches:
+                print("❌ Aucun match trouvé pour les prochaines 24 heures")
                 return []
 
             # Trier les matchs par priorité et heure de début
             matches.sort(key=lambda x: (-x.priority, x.commence_time))
             
-            # Prendre exactement le nombre minimum requis de matchs ou tous les matchs disponibles
-            # si moins que le minimum sont disponibles
+            # Déterminer combien de matchs sélectionner
+            total_matches = len(matches)
+            required_matches = self.config.MIN_PREDICTIONS  # Minimum requis
             
-            # Si nous avons plus de matchs que le minimum requis, nous sélectionnons
-            # aléatoirement exactement MIN_PREDICTIONS matchs
-            if len(matches) > self.config.MIN_PREDICTIONS:
-                # On prend des matchs de haute priorité d'abord, puis on complète aléatoirement
-                high_priority = [m for m in matches if m.priority > 0]
-                if len(high_priority) >= self.config.MIN_PREDICTIONS:
-                    # Suffisamment de matchs à haute priorité, on les sélectionne aléatoirement
-                    selected_matches = random.sample(high_priority, self.config.MIN_PREDICTIONS)
-                else:
-                    # Pas assez de matchs à haute priorité, on prend tous ceux disponibles
-                    # et on complète avec des matchs de priorité normale
-                    normal_priority = [m for m in matches if m.priority == 0]
-                    selected_high = high_priority  # On prend tous les matchs haute priorité
-                    needed = self.config.MIN_PREDICTIONS - len(selected_high)
-                    selected_normal = random.sample(normal_priority, min(needed, len(normal_priority)))
-                    selected_matches = selected_high + selected_normal
-                    
-                    # Si on n'a toujours pas assez, on prend des matchs supplémentaires
-                    if len(selected_matches) < self.config.MIN_PREDICTIONS and len(matches) >= self.config.MIN_PREDICTIONS:
-                        remaining = [m for m in matches if m not in selected_matches]
-                        still_needed = self.config.MIN_PREDICTIONS - len(selected_matches)
-                        more_matches = random.sample(remaining, min(still_needed, len(remaining)))
-                        selected_matches.extend(more_matches)
-            else:
-                # Moins de matchs disponibles que le minimum requis, on prend tous les matchs
+            # Si on a moins de matchs que le minimum requis, on prend tout ce qu'on a
+            if total_matches <= required_matches:
+                print(f"\n✅ Selection des {total_matches} matchs disponibles (moins que le minimum requis de {required_matches})")
                 selected_matches = matches
+            else:
+                # Sélection aléatoire en respectant les priorités
+                high_priority = [m for m in matches if m.priority == 1]
+                medium_priority = [m for m in matches if m.priority == 2]
+                other_matches = [m for m in matches if m.priority not in [1, 2]]
                 
+                selected_matches = []
+                
+                # Prendre d'abord les matchs à haute priorité (max 3)
+                if high_priority:
+                    num_high = min(3, len(high_priority))
+                    selected_matches.extend(random.sample(high_priority, num_high))
+                
+                # Ensuite, prendre des matchs à priorité moyenne si nécessaire
+                if len(selected_matches) < required_matches and medium_priority:
+                    num_medium = min(required_matches - len(selected_matches), len(medium_priority))
+                    selected_matches.extend(random.sample(medium_priority, num_medium))
+                
+                # Enfin, compléter avec d'autres matchs si nécessaire
+                if len(selected_matches) < required_matches and other_matches:
+                    num_other = required_matches - len(selected_matches)
+                    selected_matches.extend(random.sample(other_matches, min(num_other, len(other_matches))))
+                
+                # Si on a toujours moins que le minimum requis, prendre des matchs supplémentaires au hasard
+                if len(selected_matches) < required_matches:
+                    remaining = [m for m in matches if m not in selected_matches]
+                    if remaining:
+                        additional_needed = required_matches - len(selected_matches)
+                        selected_matches.extend(random.sample(remaining, min(additional_needed, len(remaining))))
+            
+            # Assurer qu'on a exactement le nombre requis de matchs ou tous les matchs disponibles
+            assert len(selected_matches) == min(total_matches, required_matches), f"Erreur dans la sélection: {len(selected_matches)} sélectionnés, {required_matches} requis, {total_matches} disponibles"
+            
             print(f"\n✅ {len(selected_matches)} matchs candidats sélectionnés")
-            for match in selected_matches[:len(selected_matches)]:
+            for match in selected_matches:
                 print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
                 
             return selected_matches
@@ -604,7 +677,7 @@ CONFIANCE: [pourcentage précis]"""
     async def run(self) -> None:
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
-            all_matches = self.fetch_matches(max_match_count=max(15, self.config.MIN_PREDICTIONS * 3))
+            all_matches = self.fetch_matches(max_match_count=30)  # Récupérer jusqu'à 30 matchs pour avoir un bon choix
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
                 return
