@@ -38,14 +38,9 @@ class Match:
     competition: str
     region: str
     commence_time: datetime
-    bookmakers: List[Dict]
-    all_odds: List[Dict]
     priority: int = 0
     predicted_score1: str = ""
     predicted_score2: str = ""
-    home_odds: float = 0.0
-    draw_odds: float = 0.0
-    away_odds: float = 0.0
 
 @dataclass
 class Prediction:
@@ -57,9 +52,6 @@ class Prediction:
     predicted_score2: str
     prediction: str
     confidence: int
-    home_odds: float = 0.0
-    draw_odds: float = 0.0
-    away_odds: float = 0.0
 
 class BettingBot:
     def __init__(self, config: Config):
@@ -165,13 +157,13 @@ class BettingBot:
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def fetch_matches(self, max_match_count: int = 30) -> List[Match]:
-        """Récupère des matchs de football et garantit la sélection du nombre minimum requis"""
+        """Récupère les matchs sans extraire les cotes"""
         print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
             "apiKey": self.config.ODDS_API_KEY,
             "regions": "eu",
-            "markets": "h2h,totals",
+            "markets": "h2h",
             "oddsFormat": "decimal",
             "dateFormat": "iso"
         }
@@ -183,98 +175,72 @@ class BettingBot:
             print(f"✅ {len(matches_data)} matchs récupérés")
 
             current_time = datetime.now(timezone.utc)
-            matches = []
+            all_matches = []
 
+            # Collecter tous les matchs sans filtrage complexe
             for match_data in matches_data:
                 commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
-                # Prendre les matchs des prochaines 24 heures
-                if 0 < (commence_time - current_time).total_seconds() <= 86400:
-                    competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
-                    
-                    # Extraire les cotes des bookmakers
-                    home_odds, draw_odds, away_odds = 0.0, 0.0, 0.0
-                    
-                    if match_data.get("bookmakers") and len(match_data["bookmakers"]) > 0:
-                        for bookmaker in match_data["bookmakers"]:
-                            if bookmaker.get("markets") and len(bookmaker["markets"]) > 0:
-                                for market in bookmaker["markets"]:
-                                    if market["key"] == "h2h" and len(market["outcomes"]) == 3:
-                                        for outcome in market["outcomes"]:
-                                            if outcome["name"] == match_data["home_team"]:
-                                                home_odds = outcome["price"]
-                                            elif outcome["name"] == match_data["away_team"]:
-                                                away_odds = outcome["price"]
-                                            else:
-                                                draw_odds = outcome["price"]
-                                        break
-                            if home_odds > 0 and draw_odds > 0 and away_odds > 0:
-                                break
-                    
-                    matches.append(Match(
+                competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
+                
+                # Prendre tous les matchs des prochaines 48h pour élargir la sélection
+                if 0 < (commence_time - current_time).total_seconds() <= 172800:  # 48 heures
+                    all_matches.append(Match(
                         home_team=match_data["home_team"],
                         away_team=match_data["away_team"],
                         competition=competition,
                         region=competition.split()[-1] if " " in competition else competition,
                         commence_time=commence_time,
-                        bookmakers=match_data.get("bookmakers", []),
-                        all_odds=match_data.get("bookmakers", []),
-                        priority=self.top_leagues.get(competition, 0),
-                        home_odds=home_odds,
-                        draw_odds=draw_odds,
-                        away_odds=away_odds
+                        priority=self.top_leagues.get(competition, 0)
                     ))
 
-            if not matches:
-                print("❌ Aucun match trouvé pour les prochaines 24 heures")
+            if not all_matches:
+                print("❌ Aucun match trouvé pour les prochaines 48 heures")
                 return []
 
-            # Trier les matchs par priorité et heure de début
-            matches.sort(key=lambda x: (-x.priority, x.commence_time))
+            # Sélectionner les matchs en fonction de la priorité et aléatoirement
+            all_matches.sort(key=lambda x: (-x.priority, x.commence_time))
             
             # Déterminer combien de matchs sélectionner
-            total_matches = len(matches)
-            required_matches = self.config.MIN_PREDICTIONS  # Minimum requis
+            required_matches = self.config.MIN_PREDICTIONS
             
-            # Si on a moins de matchs que le minimum requis, on prend tout ce qu'on a
-            if total_matches <= required_matches:
-                print(f"\n✅ Selection des {total_matches} matchs disponibles (moins que le minimum requis de {required_matches})")
-                selected_matches = matches
+            # S'assurer de sélectionner exactement MIN_PREDICTIONS matchs ou tous si moins disponibles
+            if len(all_matches) <= required_matches:
+                selected_matches = all_matches
             else:
-                # Sélection aléatoire en respectant les priorités
-                high_priority = [m for m in matches if m.priority == 1]
-                medium_priority = [m for m in matches if m.priority == 2]
-                other_matches = [m for m in matches if m.priority not in [1, 2]]
+                # Sélection avec priorité aux championnats majeurs
+                high_priority = [m for m in all_matches if m.priority == 1]
+                medium_priority = [m for m in all_matches if m.priority == 2]
+                other_matches = [m for m in all_matches if m.priority == 0 or m.priority > 2]
                 
                 selected_matches = []
                 
-                # Prendre d'abord les matchs à haute priorité (max 3)
+                # Prendre entre 2 et 3 matchs de haute priorité s'ils sont disponibles
                 if high_priority:
                     num_high = min(3, len(high_priority))
                     selected_matches.extend(random.sample(high_priority, num_high))
                 
-                # Ensuite, prendre des matchs à priorité moyenne si nécessaire
-                if len(selected_matches) < required_matches and medium_priority:
-                    num_medium = min(required_matches - len(selected_matches), len(medium_priority))
-                    selected_matches.extend(random.sample(medium_priority, num_medium))
+                # Prendre 1 ou 2 matchs de priorité moyenne
+                if medium_priority and len(selected_matches) < required_matches:
+                    num_medium = min(2, len(medium_priority), required_matches - len(selected_matches))
+                    if num_medium > 0:
+                        selected_matches.extend(random.sample(medium_priority, num_medium))
                 
-                # Enfin, compléter avec d'autres matchs si nécessaire
-                if len(selected_matches) < required_matches and other_matches:
-                    num_other = required_matches - len(selected_matches)
-                    selected_matches.extend(random.sample(other_matches, min(num_other, len(other_matches))))
+                # Compléter avec d'autres matchs pour atteindre le minimum requis
+                remaining_needed = required_matches - len(selected_matches)
+                if remaining_needed > 0 and other_matches:
+                    num_other = min(remaining_needed, len(other_matches))
+                    selected_matches.extend(random.sample(other_matches, num_other))
                 
-                # Si on a toujours moins que le minimum requis, prendre des matchs supplémentaires au hasard
+                # Si on n'a toujours pas assez, compléter avec n'importe quels matchs restants
                 if len(selected_matches) < required_matches:
-                    remaining = [m for m in matches if m not in selected_matches]
+                    remaining = [m for m in all_matches if m not in selected_matches]
                     if remaining:
-                        additional_needed = required_matches - len(selected_matches)
-                        selected_matches.extend(random.sample(remaining, min(additional_needed, len(remaining))))
+                        still_needed = required_matches - len(selected_matches)
+                        selected_matches.extend(random.sample(remaining, min(still_needed, len(remaining))))
             
-            # Assurer qu'on a exactement le nombre requis de matchs ou tous les matchs disponibles
-            assert len(selected_matches) == min(total_matches, required_matches), f"Erreur dans la sélection: {len(selected_matches)} sélectionnés, {required_matches} requis, {total_matches} disponibles"
-            
-            print(f"\n✅ {len(selected_matches)} matchs candidats sélectionnés")
+            print(f"\n✅ {len(selected_matches)} matchs candidats sélectionnés sur {len(all_matches)} matchs disponibles")
             for match in selected_matches:
-                print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
+                print(f"- {match.home_team} vs {match.away_team} ({match.competition})")
                 
             return selected_matches
 
@@ -333,10 +299,6 @@ Analyse OBLIGATOIREMENT et avec PRÉCISION tous ces éléments:
    - Contexte mental et dynamique d'équipe
    - Facteurs externes (météo prévue, état du terrain)
    - Tactiques probables des entraîneurs
-
-6. COTES ET PRÉDICTIONS DES EXPERTS:
-   - Tendances des cotes et mouvements significatifs
-   - Analyse des prédictions d'experts de référence
 
 Sois absolument précis et factuel avec des statistiques réelles et vérifiables."""
                     }],
@@ -436,11 +398,6 @@ Sois absolument précis et factuel avec des statistiques réelles et vérifiable
    - Performance des équipes en fonction du contexte similaire
    - Tendances de buts par période (1ère/2ème mi-temps)
 
-8. ANALYSE DES COTES:
-   - Mouvements significatifs des cotes
-   - Consensus des bookmakers
-   - Écarts notables entre cotes théoriques et cotes réelles
-
 OBJECTIF: Générer DEUX propositions de scores exacts pour le match {match.home_team} vs {match.away_team} ({match.competition}) prévu le {match.commence_time.strftime('%d/%m/%Y')}.
 
 Ces scores doivent refléter l'issue la plus probable du match selon ton analyse complète. Utilise TOUTES les données mentionnées ci-dessus pour une prédiction précise.
@@ -488,7 +445,6 @@ RÉPONDS UNIQUEMENT AU FORMAT EXACT: "Score 1: X-Y, Score 2: Z-W" où X, Y, Z et
             prompt = f"""ANALYSE APPROFONDIE POUR PRÉDICTION DE PARIS: {match.home_team} vs {match.away_team}
 COMPÉTITION: {match.competition}
 SCORES EXACTS PRÉDITS: {match.predicted_score1} et {match.predicted_score2}
-COTES: Victoire {match.home_team}: {match.home_odds}, Match nul: {match.draw_odds}, Victoire {match.away_team}: {match.away_odds}
 
 DONNÉES STATISTIQUES COMPLÈTES:
 {stats}
@@ -504,8 +460,9 @@ CONSIGNES D'ANALYSE AVANCÉE:
 8. Choisir la prédiction LA PLUS SÛRE possible parmi: {', '.join(self.available_predictions)}
 
 RÈGLES DE VÉRIFICATION STRICTES:
-- Pour prédire une victoire à domicile "1", l'équipe à domicile doit avoir une cote MAXIMALE de 1.50 ET une forme récente excellente
-- Pour prédire une victoire à l'extérieur "2", l'équipe extérieure doit avoir une cote MAXIMALE de 1.50 ET une forme récente excellente
+- Pour prédire une victoire à domicile "1", l'équipe à domicile doit avoir une forme récente EXCELLENTE et dominer clairement son adversaire
+- Pour prédire une victoire à l'extérieur "2", l'équipe extérieure doit avoir une forme récente EXCELLENTE et être nettement supérieure
+- Pour les victoires directes (1 ou 2), exiger une confiance d'au moins 90% pour cette prédiction
 - Pour prédire "1X", l'équipe à domicile doit être favorite selon les statistiques ET les scores prédits
 - Pour prédire "X2", l'équipe à l'extérieur doit être favorite selon les statistiques ET les scores prédits
 - Ne JAMAIS donner "X2" si les scores prédits favorisent l'équipe à domicile
@@ -516,11 +473,12 @@ RÈGLES DE VÉRIFICATION STRICTES:
 - Exiger une confiance d'au moins 85% pour TOUTE prédiction
 - Le match nul "X" n'est PAS une option de prédiction acceptable
 - Privilégier les prédictions avec les statistiques les plus SOLIDES et COHÉRENTES
-- En cas de doute, préférer une prédiction concernant le nombre de buts plutôt qu'une double chance non justifiée
+- En cas de doute, préférer une prédiction concernant le nombre de buts plutôt qu'une double chance ou résultat direct non justifié
 
 FORMAT DE RÉPONSE REQUIS:
 PREDICTION: [une option UNIQUE de la liste]
-CONFIANCE: [pourcentage précis]"""
+CONFIANCE: [pourcentage précis entre 80 et 100]
+JUSTIFICATION: [explication brève de la prédiction]"""
 
             message = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -532,10 +490,12 @@ CONFIANCE: [pourcentage précis]"""
             response = message.content[0].text
             prediction = re.search(r"PREDICTION:\s*(.*)", response)
             confidence = re.search(r"CONFIANCE:\s*(\d+)", response)
+            justification = re.search(r"JUSTIFICATION:\s*(.*?)($|\n\n)", response, re.DOTALL)
 
             if all([prediction, confidence]):
                 pred = prediction.group(1).strip()
                 conf = min(100, max(80, int(confidence.group(1))))
+                reason = justification.group(1).strip() if justification else ""
                 
                 if any(p.lower() in pred.lower() for p in self.available_predictions):
                     # Trouver la prédiction exacte dans la liste
@@ -544,14 +504,10 @@ CONFIANCE: [pourcentage précis]"""
                             pred = available_pred
                             break
                     
-                    # Vérifications supplémentaires pour la fiabilité des prédictions
-                    # 1. Vérifier la cohérence des victoires directes avec les cotes
-                    if pred == "1" and match.home_odds > 1.50:
-                        print(f"⚠️ Cote domicile trop élevée ({match.home_odds} > 1.50). Conversion en 1X.")
-                        pred = "1X"
-                    elif pred == "2" and match.away_odds > 1.50:
-                        print(f"⚠️ Cote extérieur trop élevée ({match.away_odds} > 1.50). Conversion en X2.")
-                        pred = "X2"
+                    # Pour les victoires directes, vérification stricte de la confiance
+                    if pred in ["1", "2"] and conf < 90:
+                        print(f"⚠️ Confiance insuffisante ({conf}% < 90%) pour victoire directe. Conversion en double chance.")
+                        pred = "1X" if pred == "1" else "X2"
                     
                     # 2. Vérifier la cohérence des doubles chances avec les scores prédits
                     if pred == "X2":
@@ -567,9 +523,6 @@ CONFIANCE: [pourcentage précis]"""
                             total_goals2 = home_goals2 + away_goals2
                             if total_goals1 >= 3 or total_goals2 >= 3:
                                 pred = "+2.5 buts"
-                                print(f"✅ Prédiction ajustée à {pred} pour cohérence avec les scores prédits")
-                            elif total_goals1 >= 2 or total_goals2 >= 2:
-                                pred = "+1.5 buts"
                                 print(f"✅ Prédiction ajustée à {pred} pour cohérence avec les scores prédits")
                             else:
                                 print("❌ Impossible de trouver une prédiction cohérente. Match ignoré.")
@@ -601,6 +554,8 @@ CONFIANCE: [pourcentage précis]"""
                         return None
                     
                     print(f"✅ Prédiction finale: {pred} (Confiance: {conf}%)")
+                    if reason:
+                        print(f"   Justification: {reason}")
                     
                     return Prediction(
                         region=match.region,
@@ -610,10 +565,7 @@ CONFIANCE: [pourcentage précis]"""
                         predicted_score1=match.predicted_score1,
                         predicted_score2=match.predicted_score2,
                         prediction=pred,
-                        confidence=conf,
-                        home_odds=match.home_odds,
-                        draw_odds=match.draw_odds,
-                        away_odds=match.away_odds
+                        confidence=conf
                     )
 
             print("❌ Pas de prédiction fiable")
@@ -631,7 +583,7 @@ CONFIANCE: [pourcentage précis]"""
         msg = f"*🤖 AL VE AI BOT - PRÉDICTIONS DU {current_date} 🤖*\n\n"
 
         for i, pred in enumerate(predictions, 1):
-            # Formatage des éléments avec gras et italique - SANS LES COTES
+            # Formatage des éléments avec gras et italique
             msg += (
                 f"*📊 MATCH #{i}*\n"
                 f"🏆 *{pred.competition}*\n"
