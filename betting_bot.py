@@ -72,38 +72,11 @@ class BettingBot:
             "-1.5 buts 1ère mi-temps", 
             "+0.5 but 1ère mi-temps", "+0.5 but 2ème mi-temps"
         ]
-        self.top_leagues = {
-            "Première Ligue Anglaise 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 1,
-            "Championnat d'Espagne de Football 🇪🇸": 1,
-            "Championnat d'Allemagne de Football 🇩🇪": 1,
-            "Championnat d'Italie de Football 🇮🇹": 1,
-            "Championnat de France de Football 🇫🇷": 1,
-            "Ligue des Champions de l'UEFA 🇪🇺": 1,
-            "Ligue Europa de l'UEFA 🇪🇺": 1,
-            "Championnat de Belgique de Football 🇧🇪": 2,
-            "Championnat des Pays-Bas de Football 🇳🇱": 2,
-            "Championnat du Portugal de Football 🇵🇹": 2
-        }
         print("Bot initialisé!")
 
-    def _get_league_name(self, competition: str) -> str:
-        league_mappings = {
-            "Premier League": "Première Ligue Anglaise 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
-            "La Liga": "Championnat d'Espagne de Football 🇪🇸",
-            "Bundesliga": "Championnat d'Allemagne de Football 🇩🇪",
-            "Serie A": "Championnat d'Italie de Football 🇮🇹",
-            "Ligue 1": "Championnat de France de Football 🇫🇷",
-            "Champions League": "Ligue des Champions de l'UEFA 🇪🇺",
-            "Europa League": "Ligue Europa de l'UEFA 🇪🇺",
-            "Belgian First Division A": "Championnat de Belgique de Football 🇧🇪",
-            "Dutch Eredivisie": "Championnat des Pays-Bas de Football 🇳🇱",
-            "Primeira Liga": "Championnat du Portugal de Football 🇵🇹"
-        }
-        return league_mappings.get(competition, competition)
-
     @retry(tries=3, delay=5, backoff=2, logger=logger)
-    def fetch_matches(self, max_match_count: int = 30) -> List[Match]:
-        """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent"""
+    def fetch_matches(self, max_match_count: int = 50) -> List[Match]:
+        """Récupère jusqu'à 50 matchs pour avoir suffisamment d'options"""
         print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
@@ -131,7 +104,7 @@ class BettingBot:
                 
                 # Ne prendre que les matchs d'aujourd'hui (jusqu'à la fin de la journée)
                 if current_time <= commence_time <= end_of_day:
-                    competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
+                    competition = match_data.get("sport_title", "Compétition inconnue")
                     
                     # Extraire les cotes des bookmakers
                     home_odds, draw_odds, away_odds = 0.0, 0.0, 0.0
@@ -152,15 +125,18 @@ class BettingBot:
                             if home_odds > 0 and draw_odds > 0 and away_odds > 0:
                                 break
                     
+                    # Extraire la région de façon simple
+                    region = "International"  # Valeur par défaut
+                    
                     matches.append(Match(
                         home_team=match_data["home_team"],
                         away_team=match_data["away_team"],
                         competition=competition,
-                        region=competition.split()[-1] if " " in competition else competition,
+                        region=region,
                         commence_time=commence_time,
                         bookmakers=match_data.get("bookmakers", []),
                         all_odds=match_data.get("bookmakers", []),
-                        priority=self.top_leagues.get(competition, 0),
+                        priority=0,  # Ne pas utiliser de priorité basée sur le championnat
                         home_odds=home_odds,
                         draw_odds=draw_odds,
                         away_odds=away_odds
@@ -169,10 +145,10 @@ class BettingBot:
             if not matches:
                 return []
 
-            # Trier les matchs par priorité et heure de début
-            matches.sort(key=lambda x: (-x.priority, x.commence_time))
+            # Trier les matchs uniquement par heure de début
+            matches.sort(key=lambda x: x.commence_time)
             
-            # Prendre plus de matchs que nécessaire pour avoir des alternatives
+            # Prendre les premiers max_match_count matchs
             top_matches = matches[:max_match_count]
             
             print(f"\n✅ {len(top_matches)} matchs candidats sélectionnés")
@@ -564,8 +540,8 @@ CONFIANCE: [pourcentage précis]"""
         
         try:
             # Vérifier que nous avons exactement 5 prédictions
-            if len(predictions) < self.config.MIN_PREDICTIONS:
-                print(f"⚠️ Seulement {len(predictions)}/{self.config.MIN_PREDICTIONS} prédictions")
+            if len(predictions) < 5:
+                print(f"⚠️ Seulement {len(predictions)}/5 prédictions")
                 print("⚠️ Les prédictions ne seront pas envoyées - nombre minimum non atteint")
                 return
             
@@ -586,26 +562,26 @@ CONFIANCE: [pourcentage précis]"""
     async def run(self) -> None:
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
-            all_matches = self.fetch_matches(max_match_count=30)  # Récupérer jusqu'à 30 matchs candidats
+            all_matches = self.fetch_matches(max_match_count=50)  # Récupérer jusqu'à 50 matchs candidats
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
                 return
 
+            # Sélectionner les 10 premiers matchs pour l'analyse (pour avoir des alternatives)
+            matches_to_analyze = all_matches[:10]
+            
+            print(f"\n⭐ Analyse des {len(matches_to_analyze)} premiers matchs pour obtenir 5 prédictions...")
+            
             predictions = []
             processed_count = 0
-            remaining_tries = 15  # Nombre maximum de tentatives après avoir atteint 5 prédictions
             
-            # Traiter chaque match jusqu'à obtenir au moins 5 prédictions
-            for match in all_matches:
+            # Traiter chaque match jusqu'à obtenir exactement 5 prédictions
+            for match in matches_to_analyze:
                 processed_count += 1
                 
-                # Si on a déjà 5 prédictions et épuisé les essais supplémentaires, on arrête
-                if len(predictions) >= self.config.MIN_PREDICTIONS and remaining_tries <= 0:
+                # Si on a déjà 5 prédictions, on arrête
+                if len(predictions) >= 5:
                     break
-                
-                # Si on a déjà 5 prédictions, décrémenter le compteur d'essais restants
-                if len(predictions) >= self.config.MIN_PREDICTIONS:
-                    remaining_tries -= 1
                 
                 # Obtenir les deux scores exacts probables
                 scores = self.get_predicted_scores(match)
@@ -625,7 +601,7 @@ CONFIANCE: [pourcentage précis]"""
                 prediction = self.analyze_match(match, stats)
                 if prediction:
                     predictions.append(prediction)
-                    print(f"✅ Prédiction {len(predictions)}/{self.config.MIN_PREDICTIONS} obtenue")
+                    print(f"✅ Prédiction {len(predictions)}/5 obtenue")
                 else:
                     print(f"⚠️ Analyse sans prédiction fiable pour {match.home_team} vs {match.away_team}")
                 
@@ -634,28 +610,62 @@ CONFIANCE: [pourcentage précis]"""
             
             print(f"\n📊 {processed_count} matchs traités, {len(predictions)} prédictions obtenues")
             
-            # Si nous avons exactement 5 prédictions, procéder à l'envoi
-            if len(predictions) == self.config.MIN_PREDICTIONS:
-                print(f"✅ Nombre exact de prédictions atteint: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
+            # Si nous avons moins de 5 prédictions, essayer d'analyser plus de matchs
+            if len(predictions) < 5:
+                print(f"⚠️ Nombre insuffisant de prédictions: {len(predictions)}/5")
+                # Essayer avec les matchs suivants, jusqu'à 40 de plus
+                additional_matches = all_matches[10:50]
+                print(f"⚠️ Tentative avec {len(additional_matches)} matchs supplémentaires...")
+                
+                for match in additional_matches:
+                    processed_count += 1
+                    
+                    # Si on a déjà 5 prédictions, on arrête
+                    if len(predictions) >= 5:
+                        break
+                    
+                    # Obtenir les deux scores exacts probables
+                    scores = self.get_predicted_scores(match)
+                    if not scores:
+                        continue
+                        
+                    match.predicted_score1, match.predicted_score2 = scores
+                    
+                    # Obtenir les statistiques
+                    stats = self.get_match_stats(match)
+                    if not stats:
+                        continue
+                    
+                    # Analyser le match et obtenir une prédiction
+                    prediction = self.analyze_match(match, stats)
+                    if prediction:
+                        predictions.append(prediction)
+                        print(f"✅ Prédiction {len(predictions)}/5 obtenue")
+                    
+                    # Attendre un peu entre chaque analyse pour ne pas surcharger les API
+                    await asyncio.sleep(5)
+                    
+                    # Si on a atteint 5 prédictions, on peut sortir de la boucle
+                    if len(predictions) >= 5:
+                        break
+            
+            # Vérifier si nous avons atteint 5 prédictions
+            if len(predictions) == 5:
+                print(f"✅ Nombre exact de prédictions atteint: 5/5")
                 await self.send_predictions(predictions)
                 print("=== ✅ EXÉCUTION TERMINÉE ===")
-                
-            # Si nous avons plus de 5 prédictions, n'envoyer que les 5 premières
-            elif len(predictions) > self.config.MIN_PREDICTIONS:
-                print(f"✅ Plus que le minimum requis: {len(predictions)} prédictions, gardons les {self.config.MIN_PREDICTIONS} premières")
-                predictions = predictions[:self.config.MIN_PREDICTIONS]
+            elif len(predictions) > 5:
+                print(f"✅ Plus que le minimum requis: {len(predictions)} prédictions, gardons les 5 premières")
+                predictions = predictions[:5]
                 await self.send_predictions(predictions)
                 print("=== ✅ EXÉCUTION TERMINÉE ===")
-                
-            # Si nous avons moins de 5 prédictions, ne rien envoyer
             else:
-                print(f"❌ Nombre insuffisant de prédictions: {len(predictions)}/{self.config.MIN_PREDICTIONS}")
-                print("❌ Aucun message ne sera envoyé - ajouter plus de matchs à l'API ou réessayer plus tard")
+                print(f"❌ Nombre insuffisant de prédictions: {len(predictions)}/5 après {processed_count} matchs analysés")
+                print("❌ Aucun message ne sera envoyé - réessayer plus tard")
 
         except Exception as e:
             print(f"❌ ERREUR GÉNÉRALE: {str(e)}")
-
-# Fonctions utilitaires
+          # Fonctions utilitaires
 async def send_test_message(bot, chat_id):
     """Envoie un message de test pour vérifier la connectivité avec Telegram"""
     try:
