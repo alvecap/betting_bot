@@ -104,111 +104,110 @@ class BettingBot:
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def fetch_matches(self, max_match_count: int = 15) -> List[Match]:
-    """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent"""
-    print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
-    url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
-    params = {
-        "apiKey": self.config.ODDS_API_KEY,
-        "regions": "eu",
-        "markets": "h2h,totals",
-        "oddsFormat": "decimal",
-        "dateFormat": "iso"
-    }
+        """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent"""
+        print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
+        url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
+        params = {
+            "apiKey": self.config.ODDS_API_KEY,
+            "regions": "eu",
+            "markets": "h2h,totals",
+            "oddsFormat": "decimal",
+            "dateFormat": "iso"
+        }
 
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        matches_data = response.json()
-        print(f"✅ {len(matches_data)} matchs récupérés")
+        try:
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            matches_data = response.json()
+            print(f"✅ {len(matches_data)} matchs récupérés")
 
-        current_time = datetime.now(timezone.utc)
-        matches = []
+            current_time = datetime.now(timezone.utc)
+            matches = []
 
-        for match_data in matches_data:
-            commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
-            # Prendre les matchs des prochaines 24 heures
-            if 0 < (commence_time - current_time).total_seconds() <= 86400:
-                competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
-                
-                # Extraire les cotes des bookmakers
-                home_odds, draw_odds, away_odds = 0.0, 0.0, 0.0
-                
-                if match_data.get("bookmakers") and len(match_data["bookmakers"]) > 0:
-                    for bookmaker in match_data["bookmakers"]:
-                        if bookmaker.get("markets") and len(bookmaker["markets"]) > 0:
-                            for market in bookmaker["markets"]:
-                                if market["key"] == "h2h" and len(market["outcomes"]) == 3:
-                                    for outcome in market["outcomes"]:
-                                        if outcome["name"] == match_data["home_team"]:
-                                            home_odds = outcome["price"]
-                                        elif outcome["name"] == match_data["away_team"]:
-                                            away_odds = outcome["price"]
-                                        else:
-                                            draw_odds = outcome["price"]
-                                    break
-                        if home_odds > 0 and draw_odds > 0 and away_odds > 0:
-                            break
-                
-                matches.append(Match(
-                    home_team=match_data["home_team"],
-                    away_team=match_data["away_team"],
-                    competition=competition,
-                    region=competition.split()[-1] if " " in competition else competition,
-                    commence_time=commence_time,
-                    bookmakers=match_data.get("bookmakers", []),
-                    all_odds=match_data.get("bookmakers", []),
-                    priority=self.top_leagues.get(competition, 0),
-                    home_odds=home_odds,
-                    draw_odds=draw_odds,
-                    away_odds=away_odds
-                ))
+            for match_data in matches_data:
+                commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
+                # Prendre les matchs des prochaines 24 heures
+                if 0 < (commence_time - current_time).total_seconds() <= 86400:
+                    competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
+                    
+                    # Extraire les cotes des bookmakers
+                    home_odds, draw_odds, away_odds = 0.0, 0.0, 0.0
+                    
+                    if match_data.get("bookmakers") and len(match_data["bookmakers"]) > 0:
+                        for bookmaker in match_data["bookmakers"]:
+                            if bookmaker.get("markets") and len(bookmaker["markets"]) > 0:
+                                for market in bookmaker["markets"]:
+                                    if market["key"] == "h2h" and len(market["outcomes"]) == 3:
+                                        for outcome in market["outcomes"]:
+                                            if outcome["name"] == match_data["home_team"]:
+                                                home_odds = outcome["price"]
+                                            elif outcome["name"] == match_data["away_team"]:
+                                                away_odds = outcome["price"]
+                                            else:
+                                                draw_odds = outcome["price"]
+                                        break
+                            if home_odds > 0 and draw_odds > 0 and away_odds > 0:
+                                break
+                    
+                    matches.append(Match(
+                        home_team=match_data["home_team"],
+                        away_team=match_data["away_team"],
+                        competition=competition,
+                        region=competition.split()[-1] if " " in competition else competition,
+                        commence_time=commence_time,
+                        bookmakers=match_data.get("bookmakers", []),
+                        all_odds=match_data.get("bookmakers", []),
+                        priority=self.top_leagues.get(competition, 0),
+                        home_odds=home_odds,
+                        draw_odds=draw_odds,
+                        away_odds=away_odds
+                    ))
 
-        if not matches:
-            return []
+            if not matches:
+                return []
 
-        # Trier les matchs par priorité et heure de début
-        matches.sort(key=lambda x: (-x.priority, x.commence_time))
-        
-        # Prendre exactement le nombre minimum requis de matchs ou tous les matchs disponibles
-        # si moins que le minimum sont disponibles
-        required_matches = min(len(matches), max(self.config.MIN_PREDICTIONS, max_match_count))
-        
-        # Si nous avons plus de matchs que le minimum requis, nous sélectionnons
-        # aléatoirement exactement MIN_PREDICTIONS matchs
-        if len(matches) > self.config.MIN_PREDICTIONS:
-            # On prend des matchs de haute priorité d'abord, puis on complète aléatoirement
-            high_priority = [m for m in matches if m.priority > 0]
-            if len(high_priority) >= self.config.MIN_PREDICTIONS:
-                # Suffisamment de matchs à haute priorité, on les sélectionne aléatoirement
-                selected_matches = random.sample(high_priority, self.config.MIN_PREDICTIONS)
+            # Trier les matchs par priorité et heure de début
+            matches.sort(key=lambda x: (-x.priority, x.commence_time))
+            
+            # Prendre exactement le nombre minimum requis de matchs ou tous les matchs disponibles
+            # si moins que le minimum sont disponibles
+            
+            # Si nous avons plus de matchs que le minimum requis, nous sélectionnons
+            # aléatoirement exactement MIN_PREDICTIONS matchs
+            if len(matches) > self.config.MIN_PREDICTIONS:
+                # On prend des matchs de haute priorité d'abord, puis on complète aléatoirement
+                high_priority = [m for m in matches if m.priority > 0]
+                if len(high_priority) >= self.config.MIN_PREDICTIONS:
+                    # Suffisamment de matchs à haute priorité, on les sélectionne aléatoirement
+                    selected_matches = random.sample(high_priority, self.config.MIN_PREDICTIONS)
+                else:
+                    # Pas assez de matchs à haute priorité, on prend tous ceux disponibles
+                    # et on complète avec des matchs de priorité normale
+                    normal_priority = [m for m in matches if m.priority == 0]
+                    selected_high = high_priority  # On prend tous les matchs haute priorité
+                    needed = self.config.MIN_PREDICTIONS - len(selected_high)
+                    selected_normal = random.sample(normal_priority, min(needed, len(normal_priority)))
+                    selected_matches = selected_high + selected_normal
+                    
+                    # Si on n'a toujours pas assez, on prend des matchs supplémentaires
+                    if len(selected_matches) < self.config.MIN_PREDICTIONS and len(matches) >= self.config.MIN_PREDICTIONS:
+                        remaining = [m for m in matches if m not in selected_matches]
+                        still_needed = self.config.MIN_PREDICTIONS - len(selected_matches)
+                        more_matches = random.sample(remaining, min(still_needed, len(remaining)))
+                        selected_matches.extend(more_matches)
             else:
-                # Pas assez de matchs à haute priorité, on prend tous ceux disponibles
-                # et on complète avec des matchs de priorité normale
-                normal_priority = [m for m in matches if m.priority == 0]
-                selected_high = high_priority  # On prend tous les matchs haute priorité
-                needed = self.config.MIN_PREDICTIONS - len(selected_high)
-                selected_normal = random.sample(normal_priority, min(needed, len(normal_priority)))
-                selected_matches = selected_high + selected_normal
+                # Moins de matchs disponibles que le minimum requis, on prend tous les matchs
+                selected_matches = matches
                 
-                # Si on n'a toujours pas assez, on prend des matchs supplémentaires
-                if len(selected_matches) < self.config.MIN_PREDICTIONS and len(matches) >= self.config.MIN_PREDICTIONS:
-                    remaining = [m for m in matches if m not in selected_matches]
-                    still_needed = self.config.MIN_PREDICTIONS - len(selected_matches)
-                    more_matches = random.sample(remaining, min(still_needed, len(remaining)))
-                    selected_matches.extend(more_matches)
-        else:
-            # Moins de matchs disponibles que le minimum requis, on prend tous les matchs
-            selected_matches = matches
-            
-        print(f"\n✅ {len(selected_matches)} matchs candidats sélectionnés")
-        for match in selected_matches[:len(selected_matches)]:
-            print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
-            
-        return selected_matches
+            print(f"\n✅ {len(selected_matches)} matchs candidats sélectionnés")
+            for match in selected_matches[:len(selected_matches)]:
+                print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
+                
+            return selected_matches
 
-    except Exception as e:
-        print(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
-        return []
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
+            return []
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def get_match_stats(self, match: Match) -> Optional[str]:
@@ -779,7 +778,5 @@ async def main():
         # En cas d'erreur critique, attendre avant de quitter
         await asyncio.sleep(300)  # 5 minutes
 
-if __name__ == "__main__":
-    asyncio.run(main())
 if __name__ == "__main__":
     asyncio.run(main())
