@@ -559,9 +559,12 @@ CONFIANCE: [pourcentage précis]"""
         except Exception as e:
             print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
 
-   async def run(self) -> None:
+    async def run(self) -> None:
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
+            all_matches = self.fetch_matches(max_match_count=50)  # Récupérer jusqu'à 50 matchs candidats
+            if not all_matches:
+                print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             all_matches = self.fetch_matches(max_match_count=50)  # Récupérer jusqu'à 50 matchs candidats
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
