@@ -13,6 +13,7 @@ from retry import retry
 import pytz
 import os
 import random
+import traceback
 
 # Configuration de base
 nest_asyncio.apply()
@@ -168,11 +169,13 @@ class BettingBot:
             # Trier les matchs par priorité et heure de début
             matches.sort(key=lambda x: (-x.priority, x.commence_time))
             
-            # Prendre plus de matchs que nécessaire pour avoir des alternatives
-            top_matches = matches[:max_match_count]
+            # S'assurer de prendre au moins le nombre minimum requis de matchs (config.MIN_PREDICTIONS)
+            # et au maximum max_match_count pour avoir des alternatives
+            required_matches = max(self.config.MIN_PREDICTIONS, min(len(matches), max_match_count))
+            top_matches = matches[:required_matches]
             
             print(f"\n✅ {len(top_matches)} matchs candidats sélectionnés")
-            for match in top_matches[:5]:
+            for match in top_matches[:min(5, len(top_matches))]:
                 print(f"- {match.home_team} vs {match.away_team} ({match.competition}) - Cotes: {match.home_odds}/{match.draw_odds}/{match.away_odds}")
                 
             return top_matches
@@ -533,9 +536,9 @@ CONFIANCE: [pourcentage précis]"""
             # Formatage des éléments avec gras et italique - SANS LES COTES
             msg += (
                 f"*📊 MATCH #{i}*\n"
-                f"🏆 _{pred.competition}_\n"
+                f"🏆 *{pred.competition}*\n"
                 f"*⚔️ {pred.match}*\n"
-                f"⏰ Coup d'envoi : _{pred.time}_\n"
+                f"⏰ Coup d'envoi : *{pred.time}*\n"
                 f"🔮 Scores prédits : *{pred.predicted_score1}* ou *{pred.predicted_score2}*\n"
                 f"📈 Prédiction : *{pred.prediction}*\n"
                 f"✅ Confiance : *{pred.confidence}%*\n\n"
@@ -572,11 +575,32 @@ CONFIANCE: [pourcentage précis]"""
             
         except Exception as e:
             print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
+          async def send_predictions(self, predictions: List[Prediction]) -> None:
+        if not predictions:
+            print("❌ Aucune prédiction à envoyer")
+            return
+
+        print("\n5️⃣ ENVOI DES PRÉDICTIONS")
+        
+        try:
+            message = self._format_predictions_message(predictions)
+            
+            # Envoyer un message avec formatage Markdown
+            await self.bot.send_message(
+                chat_id=self.config.TELEGRAM_CHAT_ID,
+                text=message,
+                parse_mode="Markdown",  # Activer le formatage Markdown
+                disable_web_page_preview=True
+            )
+            print(f"✅ {len(predictions)} prédictions envoyées!")
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
 
     async def run(self) -> None:
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
-            all_matches = self.fetch_matches()
+            all_matches = self.fetch_matches(max_match_count=max(15, self.config.MIN_PREDICTIONS * 3))
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
                 return
@@ -589,8 +613,8 @@ CONFIANCE: [pourcentage précis]"""
             for match in all_matches:
                 processed_count += 1
                 
-                # Si on a atteint le nombre de prédictions requis, on s'arrête
-                if len(predictions) >= self.config.MIN_PREDICTIONS:
+                # Si on a atteint le nombre maximum de prédictions, on s'arrête
+                if len(predictions) >= self.config.MAX_MATCHES:
                     break
                 
                 # Obtenir les deux scores exacts probables
