@@ -575,27 +575,6 @@ CONFIANCE: [pourcentage précis]"""
             
         except Exception as e:
             print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
-          async def send_predictions(self, predictions: List[Prediction]) -> None:
-        if not predictions:
-            print("❌ Aucune prédiction à envoyer")
-            return
-
-        print("\n5️⃣ ENVOI DES PRÉDICTIONS")
-        
-        try:
-            message = self._format_predictions_message(predictions)
-            
-            # Envoyer un message avec formatage Markdown
-            await self.bot.send_message(
-                chat_id=self.config.TELEGRAM_CHAT_ID,
-                text=message,
-                parse_mode="Markdown",  # Activer le formatage Markdown
-                disable_web_page_preview=True
-            )
-            print(f"✅ {len(predictions)} prédictions envoyées!")
-            
-        except Exception as e:
-            print(f"❌ Erreur lors de l'envoi des prédictions: {str(e)}")
 
     async def run(self) -> None:
         try:
@@ -774,5 +753,7 @@ async def main():
         # En cas d'erreur critique, attendre avant de quitter
         await asyncio.sleep(300)  # 5 minutes
 
+if __name__ == "__main__":
+    asyncio.run(main())
 if __name__ == "__main__":
     asyncio.run(main())
