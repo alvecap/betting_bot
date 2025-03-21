@@ -103,7 +103,7 @@ class BettingBot:
         return league_mappings.get(competition, competition)
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
-def fetch_matches(self, max_match_count: int = 15) -> List[Match]:
+    def fetch_matches(self, max_match_count: int = 15) -> List[Match]:
     """Récupère plus de matchs que nécessaire pour avoir des alternatives si certains échouent"""
     print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
     url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
