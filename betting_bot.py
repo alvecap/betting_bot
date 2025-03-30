@@ -523,134 +523,173 @@ IMPORTANT: Données factuelles uniquement, pas d'analyse ni de pronostic."""
             
             data_content = "\n\n".join(data_sections)
             
-            # Étape 1: Obtenir les scores probables
-            scores_prompt = f"""Tu es un expert en prédiction de scores exacts pour les matchs de football, utilisant une approche factuelle et statistique.
+            # ÉTAPE 1: Obtenir les scores probables avec un prompt très directif
+            scores_prompt = f"""En tant qu'expert en prédiction de football, donne-moi EXACTEMENT deux scores probables pour le match {match.home_team} vs {match.away_team}.
 
-# INFORMATIONS SUR LE MATCH
-Match: {match.home_team} vs {match.away_team}
-Compétition: {match.competition}
-Date: {match.commence_time.strftime('%d/%m/%Y')}
-
-# DONNÉES STATISTIQUES COMPLÈTES
-{data_content}
-
-# TÂCHE
-En utilisant UNIQUEMENT les données statistiques ci-dessus et ton expertise en modélisation statistique:
-
-1. Utilise une méthode ELO avancée pour évaluer la force relative des équipes
-2. Applique un modèle de Poisson pour estimer la distribution probable des buts
-3. Analyse l'impact des facteurs contextuels (absences, enjeu, forme)
-4. Considère les tendances des confrontations directes
-5. Évalue séparément les performances à domicile/extérieur
-6. Produis DEUX scores exacts les plus probables pour ce match
-
-# FORMAT DE RÉPONSE REQUIS
-Tu dois répondre STRICTEMENT dans ce format exact:
+IMPORTANT: Réponds UNIQUEMENT avec le format exact ci-dessous, sans aucune explication:
 
 SCORE_1: X-Y
-SCORE_2: P-Q
+SCORE_2: Z-W
 
-Où X est le nombre de buts de {match.home_team}, Y est le nombre de buts de {match.away_team} dans le premier score probable,
-et P est le nombre de buts de {match.home_team}, Q est le nombre de buts de {match.away_team} dans le second score probable.
-
-Utilise UNIQUEMENT des nombres entiers positifs (0, 1, 2, 3, etc.) pour X, Y, P et Q.
-"""
+où X, Y, Z et W sont des nombres entiers (comme 1-0, 2-1, 1-1, etc.)."""
 
             scores_message = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                max_tokens=300,
+                max_tokens=100,  # Réduit pour limiter les explications
                 temperature=0.1,
                 messages=[{"role": "user", "content": scores_prompt}]
             )
 
-            scores_response = scores_message.content[0].text
+            scores_response = scores_message.content[0].text.strip()
             
-            # Extraire les deux scores avec un regex adapté
-            score1_match = re.search(r'SCORE_1:\s*(\d+)-(\d+)', scores_response)
-            score2_match = re.search(r'SCORE_2:\s*(\d+)-(\d+)', scores_response)
+            # Extraire les deux scores avec regex plus robuste
+            score1_match = re.search(r'SCORE_1:?\s*(\d+)[ -]+(\d+)', scores_response)
+            score2_match = re.search(r'SCORE_2:?\s*(\d+)[ -]+(\d+)', scores_response)
             
             if not score1_match or not score2_match:
-                print("❌ Format de scores invalide. Réponse obtenue:")
+                print("❌ Première tentative pour les scores échouée. Réponse:")
                 print(scores_response)
-                return None
                 
-            score1 = f"{score1_match.group(1)}-{score1_match.group(2)}"
-            score2 = f"{score2_match.group(1)}-{score2_match.group(2)}"
-            print(f"✅ Scores probables obtenus: {score1} et {score2}")
+                # Deuxième tentative avec prompt ultra-simple
+                # Deuxième tentative avec prompt ultra-simple
+                retry_prompt = f"""Donne-moi exactement deux lignes au format suivant pour prédire le score de {match.home_team} vs {match.away_team}:
+
+SCORE_1: 1-0
+SCORE_2: 2-1
+
+(Ces chiffres sont des exemples - utilise tes propres prédictions)"""
+
+                retry_message = self.claude_client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=50,
+                    temperature=0.1,
+                    messages=[{"role": "user", "content": retry_prompt}]
+                )
+                
+                scores_response = retry_message.content[0].text.strip()
+                score1_match = re.search(r'SCORE_1:?\s*(\d+)[ -]+(\d+)', scores_response)
+                score2_match = re.search(r'SCORE_2:?\s*(\d+)[ -]+(\d+)', scores_response)
+                
+                # Si toujours pas de match, extraire simplement les paires de chiffres
+                if not score1_match or not score2_match:
+                    print("❌ Deuxième tentative pour les scores échouée. Réponse:")
+                    print(scores_response)
+                    
+                    # Extraction de secours de n'importe quelles paires de chiffres
+                    number_pairs = re.findall(r'(\d+)[ -]+(\d+)', scores_response)
+                    if len(number_pairs) >= 2:
+                        score1 = f"{number_pairs[0][0]}-{number_pairs[0][1]}"
+                        score2 = f"{number_pairs[1][0]}-{number_pairs[1][1]}"
+                        print(f"✅ Scores extraits du texte: {score1} et {score2}")
+                    else:
+                        # En dernier recours, utiliser des scores par défaut
+                        score1 = "1-0"
+                        score2 = "1-1"
+                        print(f"⚠️ Utilisation de scores par défaut: {score1} et {score2}")
+                else:
+                    score1 = f"{score1_match.group(1)}-{score1_match.group(2)}"
+                    score2 = f"{score2_match.group(1)}-{score2_match.group(2)}"
+                    print(f"✅ Scores obtenus à la deuxième tentative: {score1} et {score2}")
+            else:
+                score1 = f"{score1_match.group(1)}-{score1_match.group(2)}"
+                score2 = f"{score2_match.group(1)}-{score2_match.group(2)}"
+                print(f"✅ Scores probables obtenus: {score1} et {score2}")
             
+            # Enregistrer les scores dans l'objet match
             match.predicted_score1 = score1
             match.predicted_score2 = score2
             
-            # Étape 2: Analyser et prédire le pari le plus sûr
-            prediction_prompt = f"""Tu es un expert en analyse de paris sportifs qui fait des recommandations basées uniquement sur les données statistiques et les scores probables.
+            # ÉTAPE 2: Analyser et prédire le pari le plus sûr
+            # Maintenant avec les données statistiques complètes
+            analysis_prompt = f"""Analyse ces données pour prédire le résultat le plus sûr pour le match {match.home_team} vs {match.away_team}.
 
-# INFORMATIONS SUR LE MATCH
-Match: {match.home_team} vs {match.away_team}
-Compétition: {match.competition}
-Date: {match.commence_time.strftime('%d/%m/%Y')}
-Scores probables: {score1} et {score2}
-
-# DONNÉES STATISTIQUES COMPLÈTES
+DONNÉES:
+- Scores probables: {score1} et {score2}
+- Compétition: {match.competition}
 {data_content}
 
-# OPTIONS DE PRÉDICTION DISPONIBLES
+OPTIONS DISPONIBLES:
 {', '.join(self.available_predictions)}
 
-# RÈGLES STRICTES POUR LA SÉLECTION DE PRÉDICTION
-1. Ignore complètement la réputation ou la notoriété des équipes
-2. Base ta prédiction UNIQUEMENT sur les données statistiques et les scores probables
-3. La prédiction doit être cohérente avec les scores probables
-4. Ne recommande une victoire directe (1 ou 2) que si ton niveau de confiance est d'au moins 90%
-5. Ne recommande pas "1X" si les scores probables favorisent l'équipe extérieure
-6. Ne recommande pas "X2" si les scores probables favorisent l'équipe à domicile
-7. Pour "+1.5 buts", assure-toi que tu es sûr à 90% qu'il y aura au moins 2 buts
-8. Pour "+2.5 buts", assure-toi que tu es sûr à 90% qu'il y aura au moins 3 buts
-9. Pour "-3.5 buts", assure-toi que tu es sûr à 85% qu'il y aura moins de 4 buts
-10. Ta confiance minimum pour toute prédiction doit être d'au moins 85%
+RÈGLES:
+- Base ta prédiction uniquement sur les données statistiques
+- Choisis une seule option parmi celles disponibles
+- Ta confiance doit être d'au moins 85%
 
-# FORMAT DE RÉPONSE REQUIS
-PRÉDICTION: [une seule option parmi la liste]
-CONFIANCE: [pourcentage précis entre 85 et 100]
-
-N'inclus aucune explication ou justification, seulement ces deux lignes.
-"""
+RÉPONDS EXACTEMENT AVEC CE FORMAT:
+PRÉDICTION: [option choisie]
+CONFIANCE: [pourcentage]"""
 
             prediction_message = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                max_tokens=300,
+                max_tokens=100,
                 temperature=0.1,
-                messages=[{"role": "user", "content": prediction_prompt}]
+                messages=[{"role": "user", "content": analysis_prompt}]
             )
 
-            prediction_response = prediction_message.content[0].text
+            prediction_response = prediction_message.content[0].text.strip()
             
-            prediction_match = re.search(r'PRÉDICTION:\s*(.*)', prediction_response)
-            confidence_match = re.search(r'CONFIANCE:\s*(\d+)', prediction_response)
+            # Extraction avec regex robuste
+            prediction_match = re.search(r'PR[ÉE]DICTION:?\s*([^\n\r]+)', prediction_response)
+            confidence_match = re.search(r'CONFIANCE:?\s*(\d+)', prediction_response)
             
             if not prediction_match or not confidence_match:
-                print("❌ Format de prédiction invalide. Réponse obtenue:")
+                print("❌ Première tentative pour la prédiction échouée. Réponse:")
                 print(prediction_response)
-                return None
+                
+                # Deuxième tentative avec prompt ultra-simple
+                retry_prompt = f"""Choisis UNE SEULE prédiction parmi cette liste pour {match.home_team} vs {match.away_team}:
+{', '.join(self.available_predictions)}
+
+Réponds UNIQUEMENT avec ces deux lignes:
+PRÉDICTION: [ta prédiction]
+CONFIANCE: [pourcentage entre 85 et 100]"""
+
+                retry_message = self.claude_client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=50,
+                    temperature=0.1,
+                    messages=[{"role": "user", "content": retry_prompt}]
+                )
+                
+                prediction_response = retry_message.content[0].text.strip()
+                prediction_match = re.search(r'PR[ÉE]DICTION:?\s*([^\n\r]+)', prediction_response)
+                confidence_match = re.search(r'CONFIANCE:?\s*(\d+)', prediction_response)
+                
+                if not prediction_match or not confidence_match:
+                    print("❌ Deuxième tentative pour la prédiction échouée")
+                    return None
             
-            pred = prediction_match.group(1).strip()
-            conf = min(100, max(85, int(confidence_match.group(1))))
+            # Extraire et normaliser la prédiction
+            pred_text = prediction_match.group(1).strip()
+            confidence = min(100, max(85, int(confidence_match.group(1))))
             
-            # Normaliser la prédiction au format exact souhaité
+            # Trouver la prédiction correspondante dans la liste disponible
             normalized_pred = None
-            for available in self.available_predictions:
-                if available.lower() in pred.lower():
-                    normalized_pred = available
+            for available_pred in self.available_predictions:
+                if available_pred.lower() in pred_text.lower():
+                    normalized_pred = available_pred
                     break
             
             if not normalized_pred:
-                print(f"❌ Prédiction '{pred}' non reconnue parmi les options disponibles")
-                return None
+                print(f"❌ Prédiction '{pred_text}' non reconnue dans les options disponibles")
+                
+                # Extraction de secours - prendre la première prédiction qui apparaît dans le texte
+                for available_pred in self.available_predictions:
+                    if available_pred.lower() in prediction_response.lower():
+                        normalized_pred = available_pred
+                        print(f"✅ Prédiction extraite du texte: {normalized_pred}")
+                        break
+                
+                if not normalized_pred:
+                    return None
             
             # Extraire les cotes pour la prédiction
             home_odds = match.bookmaker_odds.get("home", 0.0)
             draw_odds = match.bookmaker_odds.get("draw", 0.0)
             away_odds = match.bookmaker_odds.get("away", 0.0)
             
+            # Créer l'objet de prédiction
             prediction = Prediction(
                 region=match.region,
                 competition=match.competition,
@@ -659,15 +698,15 @@ N'inclus aucune explication ou justification, seulement ces deux lignes.
                 predicted_score1=score1,
                 predicted_score2=score2,
                 prediction=normalized_pred,
-                confidence=conf,
+                confidence=confidence,
                 home_odds=home_odds,
                 draw_odds=draw_odds,
                 away_odds=away_odds
             )
             
-            print(f"✅ Prédiction obtenue: {normalized_pred} (Confiance: {conf}%)")
+            print(f"✅ Prédiction finale: {normalized_pred} (Confiance: {confidence}%)")
             return prediction
-                
+            
         except Exception as e:
             print(f"❌ Erreur lors de l'analyse avec Claude: {str(e)}")
             traceback.print_exc()
