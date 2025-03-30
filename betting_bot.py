@@ -5,8 +5,8 @@ import logging
 import telegram
 import nest_asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from typing import List, Dict, Optional, Tuple, Any
+from dataclasses import dataclass, field
 import re
 import sys
 from retry import retry
@@ -42,7 +42,8 @@ class Match:
     priority: int = 0
     predicted_score1: str = ""
     predicted_score2: str = ""
-    stats: dict = None
+    stats: dict = field(default_factory=dict)
+    bookmaker_odds: Dict[str, float] = field(default_factory=dict)
 
 @dataclass
 class Prediction:
@@ -54,6 +55,9 @@ class Prediction:
     predicted_score2: str
     prediction: str
     confidence: int
+    home_odds: float = 0.0
+    draw_odds: float = 0.0
+    away_odds: float = 0.0
 
 class BettingBot:
     def __init__(self, config: Config):
@@ -67,99 +71,118 @@ class BettingBot:
             "-1.5 buts 1ère mi-temps", 
             "+0.5 but 1ère mi-temps", "+0.5 but 2ème mi-temps"
         ]
-        self.top_leagues = {
-            # Championnats prioritaires (niveau 1)
-            "Première Ligue Anglaise 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 1,
-            "Championnat d'Espagne de Football 🇪🇸": 1,
-            "Championnat d'Allemagne de Football 🇩🇪": 1,
-            "Championnat d'Italie de Football 🇮🇹": 1,
-            "Championnat de France de Football 🇫🇷": 1,
-            "Ligue des Champions de l'UEFA 🇪🇺": 1,
-            "Ligue Europa de l'UEFA 🇪🇺": 1,
-            
-            # Championnats secondaires (niveau 2)
-            "Championnat de Belgique de Football 🇧🇪": 2,
-            "Championnat des Pays-Bas de Football 🇳🇱": 2,
-            "Championnat du Portugal de Football 🇵🇹": 2,
-            "Premier League Russe 🇷🇺": 2,
-            "Super League Suisse 🇨🇭": 2,
-            "Süper Lig Turque 🇹🇷": 2,
-            
-            # Compétitions internationales (niveau 1)
-            "Coupe du Monde FIFA 🌍": 1,
-            "Ligue des Nations UEFA 🇪🇺": 1,
-            "Qualifications Coupe du Monde UEFA 🇪🇺": 1,
-            "Qualifications Coupe du Monde CAF 🌍": 1,
-            "Qualifications Coupe du Monde CONCACAF 🌎": 1,
-            "Qualifications Coupe du Monde CONMEBOL 🌎": 1,
-            "Qualifications Coupe du Monde AFC 🌏": 1,
-            "Qualifications Coupe du Monde OFC 🌏": 1,
-            "Coupe d'Afrique des Nations 🌍": 1,
-            "Copa America 🌎": 1,
-            "Championnat d'Europe UEFA 🇪🇺": 1,
-            
-            # Autres championnats internationaux (niveau 3)
-            "MLS 🇺🇸": 3,
-            "Liga MX 🇲🇽": 3,
-            "J-League 🇯🇵": 3,
-            "K-League 🇰🇷": 3,
-            "A-League 🇦🇺": 3,
-            "Chinese Super League 🇨🇳": 3,
-            "Brasileirão 🇧🇷": 3,
-            "Argentine Primera División 🇦🇷": 3
+        
+        # Définition des 5 grands championnats avec priorité maximale
+        self.top5_leagues = {
+            "Première Ligue Anglaise 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 1,  # Premier League
+            "Championnat d'Espagne de Football 🇪🇸": 1,  # La Liga
+            "Championnat d'Allemagne de Football 🇩🇪": 1,  # Bundesliga
+            "Championnat d'Italie de Football 🇮🇹": 1,  # Serie A
+            "Championnat de France de Football 🇫🇷": 1,  # Ligue 1
         }
+        
+        # Autres compétitions importantes
+        self.other_leagues = {
+            "Ligue des Champions de l'UEFA 🇪🇺": 2,
+            "Ligue Europa de l'UEFA 🇪🇺": 2,
+            "Ligue Conférence de l'UEFA 🇪🇺": 3,
+            
+            # Championnats secondaires
+            "Championnat de Belgique de Football 🇧🇪": 3,
+            "Championnat des Pays-Bas de Football 🇳🇱": 3,
+            "Championnat du Portugal de Football 🇵🇹": 3,
+            "Premier League Russe 🇷🇺": 3,
+            "Super League Suisse 🇨🇭": 3,
+            "Süper Lig Turque 🇹🇷": 3,
+            "Championship Anglais 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 3,
+            "Ligue 2 Française 🇫🇷": 3,
+            "Serie B Italienne 🇮🇹": 3,
+            "Segunda División Espagnole 🇪🇸": 3,
+            "2. Bundesliga Allemande 🇩🇪": 3,
+            
+            # Compétitions internationales
+            "Coupe du Monde FIFA 🌍": 2,
+            "Ligue des Nations UEFA 🇪🇺": 2,
+            "Championnat d'Europe UEFA 🇪🇺": 2,
+            "Copa America 🌎": 2,
+            "Coupe d'Afrique des Nations 🌍": 3,
+            
+            # Autres championnats internationaux
+            "MLS 🇺🇸": 4,
+            "Liga MX 🇲🇽": 4,
+            "J-League 🇯🇵": 4,
+            "K-League 🇰🇷": 4,
+            "A-League 🇦🇺": 4,
+            "Chinese Super League 🇨🇳": 4,
+            "Brasileirão 🇧🇷": 4,
+            "Argentine Primera División 🇦🇷": 4
+        }
+        
+        # Fusionner les deux dictionnaires pour avoir toutes les ligues
+        self.all_leagues = {**self.top5_leagues, **self.other_leagues}
+        
         print("Bot initialisé!")
 
     def _get_league_name(self, competition: str) -> str:
+        """Normalise les noms de compétitions pour correspondre à notre nomenclature"""
         league_mappings = {
             # Grands championnats européens
             "Premier League": "Première Ligue Anglaise 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+            "EPL": "Première Ligue Anglaise 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
             "La Liga": "Championnat d'Espagne de Football 🇪🇸",
+            "Primera Division": "Championnat d'Espagne de Football 🇪🇸",
             "Bundesliga": "Championnat d'Allemagne de Football 🇩🇪",
             "Serie A": "Championnat d'Italie de Football 🇮🇹",
             "Ligue 1": "Championnat de France de Football 🇫🇷",
             
             # Coupes européennes
             "Champions League": "Ligue des Champions de l'UEFA 🇪🇺",
+            "UEFA Champions League": "Ligue des Champions de l'UEFA 🇪🇺",
             "Europa League": "Ligue Europa de l'UEFA 🇪🇺",
+            "UEFA Europa League": "Ligue Europa de l'UEFA 🇪🇺",
             "Conference League": "Ligue Conférence de l'UEFA 🇪🇺",
+            "UEFA Europa Conference League": "Ligue Conférence de l'UEFA 🇪🇺",
             
             # Championnats européens secondaires
+            "Belgian Pro League": "Championnat de Belgique de Football 🇧🇪",
             "Belgian First Division A": "Championnat de Belgique de Football 🇧🇪",
             "Eredivisie": "Championnat des Pays-Bas de Football 🇳🇱",
             "Primeira Liga": "Championnat du Portugal de Football 🇵🇹",
             "Russian Premier League": "Premier League Russe 🇷🇺",
             "Swiss Super League": "Super League Suisse 🇨🇭",
             "Turkish Super Lig": "Süper Lig Turque 🇹🇷",
+            "Championship": "Championship Anglais 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+            "EFL Championship": "Championship Anglais 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+            "Ligue 2": "Ligue 2 Française 🇫🇷",
+            "Serie B": "Serie B Italienne 🇮🇹",
+            "Segunda Division": "Segunda División Espagnole 🇪🇸",
+            "2. Bundesliga": "2. Bundesliga Allemande 🇩🇪",
             
             # Compétitions internationales
             "FIFA World Cup": "Coupe du Monde FIFA 🌍",
             "UEFA Nations League": "Ligue des Nations UEFA 🇪🇺",
             "UEFA European Championship": "Championnat d'Europe UEFA 🇪🇺",
-            "FIFA World Cup Qualification (UEFA)": "Qualifications Coupe du Monde UEFA 🇪🇺",
-            "FIFA World Cup Qualification (CAF)": "Qualifications Coupe du Monde CAF 🌍",
-            "FIFA World Cup Qualification (CONCACAF)": "Qualifications Coupe du Monde CONCACAF 🌎",
-            "FIFA World Cup Qualification (CONMEBOL)": "Qualifications Coupe du Monde CONMEBOL 🌎",
-            "FIFA World Cup Qualification (AFC)": "Qualifications Coupe du Monde AFC 🌏",
-            "FIFA World Cup Qualification (OFC)": "Qualifications Coupe du Monde OFC 🌏",
+            "UEFA Euro": "Championnat d'Europe UEFA 🇪🇺",
             "Africa Cup of Nations": "Coupe d'Afrique des Nations 🌍",
             "Copa America": "Copa America 🌎",
             
             # Autres championnats internationaux
             "Major League Soccer": "MLS 🇺🇸",
+            "MLS": "MLS 🇺🇸",
             "Liga MX": "Liga MX 🇲🇽",
             "J League": "J-League 🇯🇵",
             "K League 1": "K-League 🇰🇷",
             "A-League": "A-League 🇦🇺",
             "Chinese Super League": "Chinese Super League 🇨🇳",
             "Brasileirão": "Brasileirão 🇧🇷",
+            "Brazilian Serie A": "Brasileirão 🇧🇷",
             "Argentine Primera División": "Argentine Primera División 🇦🇷"
         }
         return league_mappings.get(competition, competition)
 
     @retry(tries=3, delay=5, backoff=2, logger=logger)
-    def fetch_matches(self, max_match_count: int = 30) -> List[Match]:
-        """Récupère les matchs à venir en priorisant les meilleures ligues"""
+    def fetch_matches(self) -> List[Match]:
+        """Récupère les matchs à venir en priorisant les 5 grands championnats"""
         print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
@@ -174,190 +197,289 @@ class BettingBot:
             response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
             matches_data = response.json()
-            print(f"✅ {len(matches_data)} matchs récupérés")
+            print(f"✅ {len(matches_data)} matchs récupérés depuis l'API")
 
             current_time = datetime.now(timezone.utc)
             all_matches = []
 
             # Collecter tous les matchs des prochaines 48h
             for match_data in matches_data:
-                commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
-                competition = self._get_league_name(match_data.get("sport_title", "Unknown"))
-                
-                # Filtrer sur les prochaines 48h
-                if 0 < (commence_time - current_time).total_seconds() <= 172800:  # 48 heures
-                    all_matches.append(Match(
-                        home_team=match_data["home_team"],
-                        away_team=match_data["away_team"],
-                        competition=competition,
-                        region=competition.split()[-1] if " " in competition else competition,
-                        commence_time=commence_time,
-                        priority=self.top_leagues.get(competition, 4)  # Priorité 4 par défaut (la plus basse)
-                    ))
+                try:
+                    commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
+                    sport_title = match_data.get("sport_title", "Unknown")
+                    competition = self._get_league_name(sport_title)
+                    
+                    # Récupérer les cotes des bookmakers
+                    bookmaker_odds = {}
+                    if "bookmakers" in match_data and len(match_data["bookmakers"]) > 0:
+                        # Prendre le premier bookmaker disponible
+                        bookmaker = match_data["bookmakers"][0]
+                        for market in bookmaker.get("markets", []):
+                            if market["key"] == "h2h":
+                                for outcome in market["outcomes"]:
+                                    if outcome["name"] == match_data["home_team"]:
+                                        bookmaker_odds["home"] = outcome["price"]
+                                    elif outcome["name"] == match_data["away_team"]:
+                                        bookmaker_odds["away"] = outcome["price"]
+                                    else:
+                                        bookmaker_odds["draw"] = outcome["price"]
+                    
+                    # Filtrer sur les prochaines 48h
+                    if 0 < (commence_time - current_time).total_seconds() <= 172800:  # 48 heures
+                        # Déterminer la priorité selon la compétition
+                        if competition in self.top5_leagues:
+                            priority = 1  # Top 5 championnats
+                        elif competition in self.all_leagues:
+                            priority = self.all_leagues[competition]
+                        else:
+                            priority = 5  # Priorité la plus basse
+                        
+                        match = Match(
+                            home_team=match_data["home_team"],
+                            away_team=match_data["away_team"],
+                            competition=competition,
+                            region=competition.split()[-1] if " " in competition else "⚽",
+                            commence_time=commence_time,
+                            priority=priority,
+                            bookmaker_odds=bookmaker_odds
+                        )
+                        all_matches.append(match)
+                except Exception as e:
+                    print(f"⚠️ Erreur lors du traitement d'un match: {str(e)}")
+                    continue
 
             if not all_matches:
                 print("❌ Aucun match trouvé pour les prochaines 48 heures")
                 return []
 
+            # Compte des matchs par priorité pour le log
+            priority_counts = {}
+            for match in all_matches:
+                priority_counts[match.priority] = priority_counts.get(match.priority, 0) + 1
+            
+            print("\n📊 Répartition des matchs par priorité:")
+            for priority, count in sorted(priority_counts.items()):
+                priority_name = "Top 5 Championnats" if priority == 1 else f"Priorité {priority}"
+                print(f"  - {priority_name}: {count} matchs")
+            
             # Trier les matchs par priorité (les plus importantes d'abord)
             all_matches.sort(key=lambda x: (x.priority, x.commence_time))
             
-            # Calcul du nombre de matchs à sélectionner par niveau de priorité
-            total_required = self.config.MIN_PREDICTIONS
+            # Vérifier si nous avons suffisamment de matchs des 5 grands championnats
+            top5_matches = [m for m in all_matches if m.priority == 1]
+            print(f"\n✅ {len(top5_matches)} matchs des 5 grands championnats trouvés")
             
-            # Sélection des meilleurs matchs selon la priorité
-            priority1_matches = [m for m in all_matches if m.priority == 1]
-            priority2_matches = [m for m in all_matches if m.priority == 2]
-            priority3_matches = [m for m in all_matches if m.priority == 3]
-            other_matches = [m for m in all_matches if m.priority > 3]
+            # Si nous avons suffisamment de matchs des Top 5, ne prendre que ceux-là
+            if len(top5_matches) >= self.config.MIN_PREDICTIONS:
+                selected_matches = top5_matches[:self.config.MAX_MATCHES]
+                print(f"✅ Sélection de {len(selected_matches)} matchs uniquement des 5 grands championnats")
+            else:
+                # Sinon, compléter avec d'autres matchs de priorité supérieure
+                selected_matches = top5_matches
+                remaining_needed = self.config.MIN_PREDICTIONS - len(selected_matches)
+                
+                # Ajouter des matchs de priorité 2 si nécessaire
+                priority2_matches = [m for m in all_matches if m.priority == 2]
+                if priority2_matches and len(selected_matches) < self.config.MIN_PREDICTIONS:
+                    num_to_add = min(remaining_needed, len(priority2_matches))
+                    selected_matches.extend(priority2_matches[:num_to_add])
+                    remaining_needed -= num_to_add
+                
+                # Continuer avec priorité 3 si nécessaire
+                if remaining_needed > 0:
+                    priority3_matches = [m for m in all_matches if m.priority == 3]
+                    if priority3_matches:
+                        num_to_add = min(remaining_needed, len(priority3_matches))
+                        selected_matches.extend(priority3_matches[:num_to_add])
+                        remaining_needed -= num_to_add
+                
+                # Continuer avec d'autres priorités si toujours pas assez
+                if remaining_needed > 0:
+                    other_matches = [m for m in all_matches if m.priority > 3 and m not in selected_matches]
+                    if other_matches:
+                        num_to_add = min(remaining_needed, len(other_matches))
+                        selected_matches.extend(other_matches[:num_to_add])
             
-            selected_matches = []
-            
-            # Priorité 1: prendre au moins 60% des matchs si disponible
-            if priority1_matches:
-                num_p1 = min(int(total_required * 0.6) + 1, len(priority1_matches))
-                selected_matches.extend(random.sample(priority1_matches, num_p1))
-            
-            # Priorité 2: compléter jusqu'à 80% du total
-            remaining_for_p2 = int(total_required * 0.8) - len(selected_matches)
-            if remaining_for_p2 > 0 and priority2_matches:
-                num_p2 = min(remaining_for_p2, len(priority2_matches))
-                selected_matches.extend(random.sample(priority2_matches, num_p2))
-            
-            # Priorité 3: compléter jusqu'à 95% du total
-            remaining_for_p3 = int(total_required * 0.95) - len(selected_matches)
-            if remaining_for_p3 > 0 and priority3_matches:
-                num_p3 = min(remaining_for_p3, len(priority3_matches))
-                selected_matches.extend(random.sample(priority3_matches, num_p3))
-            
-            # Autres matchs: compléter si nécessaire
-            remaining_needed = total_required - len(selected_matches)
-            if remaining_needed > 0 and other_matches:
-                num_other = min(remaining_needed, len(other_matches))
-                selected_matches.extend(random.sample(other_matches, num_other))
-            
-            # Si on n'a toujours pas assez, reprendre des matchs prioritaires
-            if len(selected_matches) < total_required:
-                remaining = [m for m in all_matches if m not in selected_matches]
-                if remaining:
-                    still_needed = total_required - len(selected_matches)
-                    selected_matches.extend(random.sample(remaining, min(still_needed, len(remaining))))
+            # S'assurer de ne pas dépasser MAX_MATCHES
+            selected_matches = selected_matches[:self.config.MAX_MATCHES]
             
             print(f"\n✅ {len(selected_matches)} matchs candidats sélectionnés:")
             for i, match in enumerate(selected_matches, 1):
-                print(f"  {i}. {match.home_team} vs {match.away_team} ({match.competition}, Priorité: {match.priority})")
+                odds_info = ""
+                if match.bookmaker_odds:
+                    home_odds = match.bookmaker_odds.get("home", "N/A")
+                    draw_odds = match.bookmaker_odds.get("draw", "N/A")
+                    away_odds = match.bookmaker_odds.get("away", "N/A")
+                    odds_info = f" [Cotes: {home_odds}-{draw_odds}-{away_odds}]"
+                
+                print(f"  {i}. {match.home_team} vs {match.away_team} ({match.competition}, Priorité: {match.priority}){odds_info}")
                 
             return selected_matches
 
         except Exception as e:
             print(f"❌ Erreur lors de la récupération des matchs: {str(e)}")
+            traceback.print_exc()
             return []
 
-    @retry(tries=3, delay=5, backoff=2, logger=logger)
-    def collect_match_data(self, match: Match) -> Optional[dict]:
+    @retry(tries=2, delay=3, backoff=2, logger=logger)
+    def collect_match_data(self, match: Match) -> bool:
         """Collecte toutes les données brutes nécessaires pour l'analyse du match via Perplexity"""
         print(f"\n2️⃣ COLLECTE DE DONNÉES POUR {match.home_team} vs {match.away_team}")
         try:
             # Structure pour collecter les différents types de données
-            match_data = {
+            match.stats = {
                 "forme_recente": None,
                 "confrontations_directes": None,
                 "statistiques_detaillees": None,
                 "absences_effectif": None,
-                "contexte_match": None
+                "contexte_match": None,
+                "bookmaker_odds": None
             }
             
+            # Ajout des cotes des bookmakers si disponibles
+            if match.bookmaker_odds:
+                odds_content = f"Cotes actuelles des bookmakers pour {match.home_team} vs {match.away_team}:\n"
+                odds_content += f"- Victoire {match.home_team}: {match.bookmaker_odds.get('home', 'N/A')}\n"
+                odds_content += f"- Match nul: {match.bookmaker_odds.get('draw', 'N/A')}\n"
+                odds_content += f"- Victoire {match.away_team}: {match.bookmaker_odds.get('away', 'N/A')}"
+                match.stats["bookmaker_odds"] = odds_content
+                print("✅ Données de cotes des bookmakers ajoutées")
+            
             # 1. Forme récente
-            forme_prompt = f"""Tu es un collecteur de données sportives factuel. Fournir UNIQUEMENT ces statistiques précises et fiables pour {match.home_team} et {match.away_team}:
+            forme_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement ces statistiques précises et vérifiées pour le match {match.home_team} vs {match.away_team}:
 
-1. Les 5 derniers matchs de chaque équipe au format: Date | Compétition | Match | Score
-2. La forme actuelle (ex: VVNDV)
-3. Moyenne de buts marqués et encaissés sur les 5 derniers matchs
-4. Tendance offensive et défensive
+1. FORME RÉCENTE DE {match.home_team}:
+   - Résultats des 5 derniers matchs (tous formats confondus) avec date, compétition, adversaire et score exact
+   - Forme actuelle sous format série (ex: VVNDV)
+   - Moyenne de buts marqués et encaissés sur les 5 derniers matchs
+   - Performance à domicile: pourcentage de victoires, défaites, nuls
+   - Tendance offensive et défensive récente
 
-IMPORTANT: Donne UNIQUEMENT les statistiques brutes sans aucune analyse ni conclusion. Format sous forme de liste."""
+2. FORME RÉCENTE DE {match.away_team}:
+   - Résultats des 5 derniers matchs (tous formats confondus) avec date, compétition, adversaire et score exact
+   - Forme actuelle sous format série (ex: VVNDV)
+   - Moyenne de buts marqués et encaissés sur les 5 derniers matchs
+   - Performance à l'extérieur: pourcentage de victoires, défaites, nuls
+   - Tendance offensive et défensive récente
+
+IMPORTANT: Format sous forme de liste avec données UNIQUEMENT factuelle, aucune analyse ou opinion."""
 
             forme_response = self._get_perplexity_response(forme_prompt)
             if forme_response:
-                match_data["forme_recente"] = forme_response
+                match.stats["forme_recente"] = forme_response
                 print("✅ Données de forme récente collectées")
+            else:
+                print("❌ Échec de la collecte des données de forme récente")
+                return False
             
             # 2. Confrontations directes
-            h2h_prompt = f"""En tant que collecteur de données sportives, fournir UNIQUEMENT les résultats des 5 dernières confrontations directes entre {match.home_team} et {match.away_team}:
+            h2h_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement les résultats des confrontations directes entre {match.home_team} et {match.away_team}:
 
-Format pour chaque match: Date | Compétition | Match | Score
+1. HISTORIQUE DES CONFRONTATIONS:
+   - Les 5 dernières rencontres directes avec date exacte, compétition, et score final
+   - Bilan global: nombre de victoires pour chaque équipe et de matchs nuls
+   - Nombre moyen de buts par match lors des confrontations directes
+   - Nombre de matchs où les deux équipes ont marqué
+   - Tendance historique: quelle équipe domine généralement?
 
-Ajoute également:
-- Bilan global: X victoires pour {match.home_team}, Y victoires pour {match.away_team}, Z nuls
-- Nombre moyen de buts par match lors des confrontations directes
-
-IMPORTANT: Donne UNIQUEMENT les données brutes sans interprétation."""
+IMPORTANT: Format sous forme de liste, uniquement les données brutes factuelles sans analyse personnelle."""
 
             h2h_response = self._get_perplexity_response(h2h_prompt)
             if h2h_response:
-                match_data["confrontations_directes"] = h2h_response
+                match.stats["confrontations_directes"] = h2h_response
                 print("✅ Données de confrontations directes collectées")
+            else:
+                print("⚠️ Pas de données de confrontations directes disponibles")
             
             # 3. Statistiques détaillées
-            stats_prompt = f"""En tant que collecteur de données sportives, fournir uniquement ces statistiques précises pour {match.home_team} et {match.away_team}:
+            stats_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement ces statistiques précises et actuelles pour {match.home_team} et {match.away_team} dans la compétition {match.competition}:
 
-1. Pourcentage exact de matchs avec +1.5 buts cette saison
-2. Pourcentage exact de matchs avec +2.5 buts cette saison
-3. Pourcentage exact de matchs avec -3.5 buts cette saison
-4. Pourcentage de matchs où les deux équipes marquent
-5. Pourcentage de clean sheets (matchs sans encaisser de but)
-6. Statistiques à domicile/extérieur (selon l'équipe)
-7. Buts par mi-temps (1ère/2ème) cette saison
+1. STATISTIQUES DE BUTS:
+   - Pourcentage exact de matchs avec plus de 1.5 buts pour chaque équipe cette saison
+   - Pourcentage exact de matchs avec plus de 2.5 buts pour chaque équipe cette saison
+   - Pourcentage exact de matchs avec moins de 3.5 buts pour chaque équipe cette saison
+   - Pourcentage de matchs où les deux équipes ont marqué
 
-IMPORTANT: Données précises et factuelles uniquement, format tableau ou liste."""
+2. STATISTIQUES DÉFENSIVES:
+   - Pourcentage de clean sheets (matchs sans encaisser de but) pour chaque équipe
+   - Nombre moyen de buts encaissés par match pour chaque équipe
+   - Pourcentage de matchs où l'équipe a encaissé en première mi-temps
+
+3. STATISTIQUES OFFENSIVES:
+   - Nombre moyen de buts marqués par match pour chaque équipe
+   - Pourcentage de matchs où l'équipe a marqué en première mi-temps
+   - Répartition des buts par période (1ère/2ème mi-temps)
+
+IMPORTANT: Fournir UNIQUEMENT des statistiques vérifiées et factuelles, aucune opinion ou analyse."""
 
             stats_response = self._get_perplexity_response(stats_prompt)
             if stats_response:
-                match_data["statistiques_detaillees"] = stats_response
+                match.stats["statistiques_detaillees"] = stats_response
                 print("✅ Données statistiques détaillées collectées")
+            else:
+                print("❌ Échec de la collecte des statistiques détaillées")
+                return False
             
             # 4. Absences et effectif
-            absences_prompt = f"""En tant que collecteur de données sportives, fournir uniquement ces informations factuelles sur les effectifs:
+            absences_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement ces informations sur les effectifs pour le match {match.home_team} vs {match.away_team}:
 
-1. Liste des joueurs blessés ou suspendus pour {match.home_team}
-2. Liste des joueurs blessés ou suspendus pour {match.away_team}
-3. Joueurs clés de retour récemment
-4. État de forme des buteurs principaux (buts récents)
+1. ABSENCES CONFIRMÉES:
+   - Liste des joueurs blessés ou suspendus pour {match.home_team}
+   - Liste des joueurs blessés ou suspendus pour {match.away_team}
+   - Date prévue de retour si connue
 
-IMPORTANT: Format liste, données factuelles uniquement sans analyse."""
+2. JOUEURS CLÉS:
+   - Meilleurs buteurs de chaque équipe cette saison avec nombre de buts
+   - Joueurs importants de retour de blessure récemment
+   - Joueurs en forme exceptionnelle actuellement
+
+IMPORTANT: Format liste, données factuelles uniquement, pas d'analyse d'impact."""
 
             absences_response = self._get_perplexity_response(absences_prompt)
             if absences_response:
-                match_data["absences_effectif"] = absences_response
+                match.stats["absences_effectif"] = absences_response
                 print("✅ Données sur les absences et effectifs collectées")
+            else:
+                print("⚠️ Pas de données d'absences disponibles")
             
             # 5. Contexte du match
-            contexte_prompt = f"""En tant que collecteur de données sportives, fournir uniquement ces informations factuelles sur le contexte du match {match.home_team} vs {match.away_team} ({match.competition}):
+            contexte_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement ces informations sur le contexte du match {match.home_team} vs {match.away_team} dans la compétition {match.competition}:
 
-1. Position actuelle au classement des deux équipes
-2. Enjeu sportif exact (qualification, relégation, etc.)
-3. Importance du match dans le calendrier
-4. Conditions extérieures prévues (météo, état du terrain)
-5. Affluence attendue et ambiance
+1. CONTEXTE SPORTIF:
+   - Position actuelle au classement des deux équipes avec points exacts
+   - Écart de points avec les positions clés (qualification européenne, relégation, etc.)
+   - Enjeu spécifique du match pour chaque équipe
+   - Matchs à venir dans le calendrier des équipes (fatigue potentielle)
 
-IMPORTANT: Données factuelles uniquement, pas d'analyse ni d'opinion."""
+2. CONTEXTE EXTERNE:
+   - Stade où se déroule le match et affluence moyenne
+   - Conditions météorologiques prévues s'il s'agit d'un match en extérieur
+   - Historique récent de l'arbitre désigné si connu
+
+IMPORTANT: Données factuelles uniquement, pas d'analyse ni de pronostic."""
 
             contexte_response = self._get_perplexity_response(contexte_prompt)
             if contexte_response:
-                match_data["contexte_match"] = contexte_response
+                match.stats["contexte_match"] = contexte_response
                 print("✅ Données sur le contexte du match collectées")
+            else:
+                print("⚠️ Pas de données de contexte disponibles")
             
             # Vérifier que nous avons au moins les données essentielles
-            if match_data["forme_recente"] and match_data["statistiques_detaillees"]:
+            essential_data = ["forme_recente", "statistiques_detaillees"]
+            missing_data = [data for data in essential_data if not match.stats.get(data)]
+            
+            if not missing_data:
                 print("✅ Données suffisantes collectées pour l'analyse")
-                return match_data
+                return True
             else:
-                print("❌ Données insuffisantes pour l'analyse")
-                return None
+                print(f"❌ Données insuffisantes pour l'analyse. Manquant: {', '.join(missing_data)}")
+                return False
                 
         except Exception as e:
             print(f"❌ Erreur lors de la collecte des données: {str(e)}")
-            return None
+            traceback.print_exc()
+            return False
 
     def _get_perplexity_response(self, prompt: str) -> Optional[str]:
         """Fonction utilitaire pour obtenir une réponse de Perplexity"""
@@ -382,13 +504,13 @@ IMPORTANT: Données factuelles uniquement, pas d'analyse ni d'opinion."""
             print(f"❌ Erreur lors de l'appel à Perplexity: {str(e)}")
             return None
 
-    @retry(tries=3, delay=5, backoff=2, logger=logger)
-    def analyze_with_claude(self, match: Match) -> Optional[Tuple[Prediction, Tuple[str, str]]]:
+    @retry(tries=2, delay=3, backoff=2, logger=logger)
+    def analyze_with_claude(self, match: Match) -> Optional[Prediction]:
         """Analyse complète du match avec Claude pour obtenir les scores probables et la prédiction"""
         print(f"\n3️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
         
-        if not match.stats:
-            print("❌ Aucune donnée statistique disponible pour l'analyse")
+        if not match.stats.get("forme_recente") or not match.stats.get("statistiques_detaillees"):
+            print("❌ Données statistiques essentielles manquantes pour l'analyse")
             return None
         
         try:
@@ -423,11 +545,15 @@ En utilisant UNIQUEMENT les données statistiques ci-dessus et ton expertise en 
 6. Produis DEUX scores exacts les plus probables pour ce match
 
 # FORMAT DE RÉPONSE REQUIS
-réponds UNIQUEMENT au format suivant:
-SCORE_1: X-Y
-SCORE_2: Z-W
+Tu dois répondre STRICTEMENT dans ce format exact:
 
-où X, Y, Z et W sont des nombres entiers représentant les scores les plus probables selon ton analyse statistique.
+SCORE_1: X-Y
+SCORE_2: P-Q
+
+Où X est le nombre de buts de {match.home_team}, Y est le nombre de buts de {match.away_team} dans le premier score probable,
+et P est le nombre de buts de {match.home_team}, Q est le nombre de buts de {match.away_team} dans le second score probable.
+
+Utilise UNIQUEMENT des nombres entiers positifs (0, 1, 2, 3, etc.) pour X, Y, P et Q.
 """
 
             scores_message = self.claude_client.messages.create(
@@ -439,17 +565,24 @@ où X, Y, Z et W sont des nombres entiers représentant les scores les plus prob
 
             scores_response = scores_message.content[0].text
             
-            # Extraire les deux scores
+            # Extraire les deux scores avec un regex adapté
             score1_match = re.search(r'SCORE_1:\s*(\d+)-(\d+)', scores_response)
             score2_match = re.search(r'SCORE_2:\s*(\d+)-(\d+)', scores_response)
             
-            if score1_match and score2_match:
-                score1 = f"{score1_match.group(1)}-{score1_match.group(2)}"
-                score2 = f"{score2_match.group(1)}-{score2_match.group(2)}"
-                print(f"✅ Scores probables obtenus: {score1} et {score2}")
+            if not score1_match or not score2_match:
+                print("❌ Format de scores invalide. Réponse obtenue:")
+                print(scores_response)
+                return None
                 
-                # Étape 2: Analyser et prédire le pari le plus sûr
-                prediction_prompt = f"""Tu es un expert en analyse de paris sportifs qui fait des recommandations basées uniquement sur les données statistiques et les scores probables.
+            score1 = f"{score1_match.group(1)}-{score1_match.group(2)}"
+            score2 = f"{score2_match.group(1)}-{score2_match.group(2)}"
+            print(f"✅ Scores probables obtenus: {score1} et {score2}")
+            
+            match.predicted_score1 = score1
+            match.predicted_score2 = score2
+            
+            # Étape 2: Analyser et prédire le pari le plus sûr
+            prediction_prompt = f"""Tu es un expert en analyse de paris sportifs qui fait des recommandations basées uniquement sur les données statistiques et les scores probables.
 
 # INFORMATIONS SUR LE MATCH
 Match: {match.home_team} vs {match.away_team}
@@ -482,54 +615,62 @@ CONFIANCE: [pourcentage précis entre 85 et 100]
 N'inclus aucune explication ou justification, seulement ces deux lignes.
 """
 
-                prediction_message = self.claude_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=300,
-                    temperature=0.1,
-                    messages=[{"role": "user", "content": prediction_prompt}]
-                )
+            prediction_message = self.claude_client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=300,
+                temperature=0.1,
+                messages=[{"role": "user", "content": prediction_prompt}]
+            )
 
-                prediction_response = prediction_message.content[0].text
-                
-                prediction_match = re.search(r'PRÉDICTION:\s*(.*)', prediction_response)
-                confidence_match = re.search(r'CONFIANCE:\s*(\d+)', prediction_response)
-                
-                if prediction_match and confidence_match:
-                    pred = prediction_match.group(1).strip()
-                    conf = min(100, max(85, int(confidence_match.group(1))))
-                    
-                    # Normaliser la prédiction au format exact souhaité
-                    normalized_pred = None
-                    for available in self.available_predictions:
-                        if available.lower() in pred.lower():
-                            normalized_pred = available
-                            break
-                    
-                    if normalized_pred:
-                        prediction = Prediction(
-                            region=match.region,
-                            competition=match.competition,
-                            match=f"{match.home_team} vs {match.away_team}",
-                            time=match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M"),
-                            predicted_score1=score1,
-                            predicted_score2=score2,
-                            prediction=normalized_pred,
-                            confidence=conf
-                        )
-                        
-                        print(f"✅ Prédiction obtenue: {normalized_pred} (Confiance: {conf}%)")
-                        return prediction, (score1, score2)
-                    else:
-                        print(f"❌ Prédiction {pred} non reconnue parmi les options disponibles")
-                else:
-                    print("❌ Format de prédiction invalide")
-            else:
-                print("❌ Format de scores invalide")
+            prediction_response = prediction_message.content[0].text
             
-            return None
+            prediction_match = re.search(r'PRÉDICTION:\s*(.*)', prediction_response)
+            confidence_match = re.search(r'CONFIANCE:\s*(\d+)', prediction_response)
+            
+            if not prediction_match or not confidence_match:
+                print("❌ Format de prédiction invalide. Réponse obtenue:")
+                print(prediction_response)
+                return None
+            
+            pred = prediction_match.group(1).strip()
+            conf = min(100, max(85, int(confidence_match.group(1))))
+            
+            # Normaliser la prédiction au format exact souhaité
+            normalized_pred = None
+            for available in self.available_predictions:
+                if available.lower() in pred.lower():
+                    normalized_pred = available
+                    break
+            
+            if not normalized_pred:
+                print(f"❌ Prédiction '{pred}' non reconnue parmi les options disponibles")
+                return None
+            
+            # Extraire les cotes pour la prédiction
+            home_odds = match.bookmaker_odds.get("home", 0.0)
+            draw_odds = match.bookmaker_odds.get("draw", 0.0)
+            away_odds = match.bookmaker_odds.get("away", 0.0)
+            
+            prediction = Prediction(
+                region=match.region,
+                competition=match.competition,
+                match=f"{match.home_team} vs {match.away_team}",
+                time=match.commence_time.astimezone(timezone(timedelta(hours=1))).strftime("%H:%M"),
+                predicted_score1=score1,
+                predicted_score2=score2,
+                prediction=normalized_pred,
+                confidence=conf,
+                home_odds=home_odds,
+                draw_odds=draw_odds,
+                away_odds=away_odds
+            )
+            
+            print(f"✅ Prédiction obtenue: {normalized_pred} (Confiance: {conf}%)")
+            return prediction
                 
         except Exception as e:
             print(f"❌ Erreur lors de l'analyse avec Claude: {str(e)}")
+            traceback.print_exc()
             return None
 
     def _format_predictions_message(self, predictions: List[Prediction]) -> str:
@@ -587,8 +728,8 @@ N'inclus aucune explication ou justification, seulement ces deux lignes.
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             
-            # Étape 1: Récupérer les matchs en privilégiant les compétitions importantes
-            all_matches = self.fetch_matches(max_match_count=30)
+            # Étape 1: Récupérer les matchs en privilégiant les 5 grands championnats
+            all_matches = self.fetch_matches()
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
                 return
@@ -607,15 +748,14 @@ N'inclus aucune explication ou justification, seulement ces deux lignes.
                 print(f"\n📊 TRAITEMENT DU MATCH {processed_count}/{len(all_matches)}: {match.home_team} vs {match.away_team}")
                 
                 # Collecter les données brutes via Perplexity
-                match.stats = self.collect_match_data(match)
-                if not match.stats:
+                data_collected = self.collect_match_data(match)
+                if not data_collected:
                     print(f"⚠️ Données insuffisantes pour {match.home_team} vs {match.away_team}. Match ignoré.")
                     continue
                 
                 # Analyser le match avec Claude pour obtenir scores et prédiction
-                analysis_result = self.analyze_with_claude(match)
-                if analysis_result:
-                    prediction, scores = analysis_result
+                prediction = self.analyze_with_claude(match)
+                if prediction:
                     predictions.append(prediction)
                     print(f"✅ Prédiction {len(predictions)}/{self.config.MAX_MATCHES} obtenue")
                 else:
@@ -676,10 +816,8 @@ async def run_once():
     
     bot = BettingBot(config)
     
-    # Envoyer un message de test
-    await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
-    
-    # Exécuter le bot
+    # Exécuter le bot directement sans message de test
+    # pour éviter les erreurs si le chat_id est incorrect
     await bot.run()
     
     print("Exécution terminée.")
@@ -703,8 +841,11 @@ async def main():
         # Initialiser le bot
         bot = BettingBot(config)
         
-        # Test de connexion
-        await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
+        # Essayer d'envoyer un message de test, mais continuer même en cas d'échec
+        try:
+            await send_test_message(bot.bot, config.TELEGRAM_CHAT_ID)
+        except Exception as e:
+            print(f"⚠️ Message de test non envoyé: {str(e)}. Poursuite de l'exécution...")
         
         # Exécution immédiate
         print("⏰ Exécution immédiate au démarrage...")
@@ -733,11 +874,15 @@ async def main():
                 print(f"⏰ Exécution planifiée du bot à {now.strftime('%Y-%m-%d %H:%M:%S')} (heure d'Afrique centrale)")
                 
                 # Message de notification de début d'exécution
-                await bot.bot.send_message(
-                    chat_id=config.TELEGRAM_CHAT_ID,
-                    text="*⏰ GÉNÉRATION DES PRÉDICTIONS*\n\nLes prédictions du jour sont en cours de génération, veuillez patienter...",
-                    parse_mode="Markdown"
-                )
+                try:
+                    await bot.bot.send_message(
+                        chat_id=config.TELEGRAM_CHAT_ID,
+                        text="*⏰ GÉNÉRATION DES PRÉDICTIONS*\n\nLes prédictions du jour sont en cours de génération, veuillez patienter...",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    # Continuer même si le message ne peut pas être envoyé
+                    print("⚠️ Message de notification non envoyé, poursuite de l'exécution...")
                 
                 # Exécuter le bot
                 await bot.run()
