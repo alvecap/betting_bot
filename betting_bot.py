@@ -44,6 +44,7 @@ class Match:
     predicted_score2: str = ""
     stats: dict = field(default_factory=dict)
     bookmaker_odds: Dict[str, float] = field(default_factory=dict)
+    is_cup_match: bool = False  # Indique si c'est un match de coupe
 
 @dataclass
 class Prediction:
@@ -81,45 +82,72 @@ class BettingBot:
             "Championnat de France de Football 🇫🇷": 1,  # Ligue 1
         }
         
-        # Autres compétitions importantes
-        self.other_leagues = {
-            "Ligue des Champions de l'UEFA 🇪🇺": 2,
-            "Ligue Europa de l'UEFA 🇪🇺": 2,
-            "Ligue Conférence de l'UEFA 🇪🇺": 3,
+        # Coupes des 5 grands championnats et coupes européennes - priorité 1 également
+        self.top_cups = {
+            # Coupes européennes majeures
+            "Ligue des Champions de l'UEFA 🇪🇺": 1,
+            "Ligue Europa de l'UEFA 🇪🇺": 1,
             
-            # Championnats secondaires
-            "Championnat de Belgique de Football 🇧🇪": 3,
-            "Championnat des Pays-Bas de Football 🇳🇱": 3,
-            "Championnat du Portugal de Football 🇵🇹": 3,
-            "Premier League Russe 🇷🇺": 3,
-            "Super League Suisse 🇨🇭": 3,
-            "Süper Lig Turque 🇹🇷": 3,
-            "Championship Anglais 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 3,
-            "Ligue 2 Française 🇫🇷": 3,
-            "Serie B Italienne 🇮🇹": 3,
-            "Segunda División Espagnole 🇪🇸": 3,
-            "2. Bundesliga Allemande 🇩🇪": 3,
+            # Coupes nationales majeures
+            "FA Cup 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 1,
+            "EFL Cup 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 1,
+            "Copa del Rey 🇪🇸": 1,
+            "Supercoupe d'Espagne 🇪🇸": 1,
+            "DFB-Pokal 🇩🇪": 1,
+            "Supercoupe d'Allemagne 🇩🇪": 1,
+            "Coppa Italia 🇮🇹": 1,
+            "Supercoupe d'Italie 🇮🇹": 1,
+            "Coupe de France 🇫🇷": 1,
+            "Coupe de la Ligue Française 🇫🇷": 1,
+            "Trophée des Champions 🇫🇷": 1,
             
-            # Compétitions internationales
-            "Coupe du Monde FIFA 🌍": 2,
-            "Ligue des Nations UEFA 🇪🇺": 2,
-            "Championnat d'Europe UEFA 🇪🇺": 2,
-            "Copa America 🌎": 2,
-            "Coupe d'Afrique des Nations 🌍": 3,
-            
-            # Autres championnats internationaux
-            "MLS 🇺🇸": 4,
-            "Liga MX 🇲🇽": 4,
-            "J-League 🇯🇵": 4,
-            "K-League 🇰🇷": 4,
-            "A-League 🇦🇺": 4,
-            "Chinese Super League 🇨🇳": 4,
-            "Brasileirão 🇧🇷": 4,
-            "Argentine Primera División 🇦🇷": 4
+            # Autres coupes européennes
+            "Ligue Conférence de l'UEFA 🇪🇺": 2,
+            "Supercoupe de l'UEFA 🇪🇺": 1,
         }
         
-        # Fusionner les deux dictionnaires pour avoir toutes les ligues
-        self.all_leagues = {**self.top5_leagues, **self.other_leagues}
+        # Autres compétitions importantes
+        self.other_leagues = {
+            # Championnats secondaires
+            "Championnat de Belgique de Football 🇧🇪": 2,
+            "Championnat des Pays-Bas de Football 🇳🇱": 2,
+            "Championnat du Portugal de Football 🇵🇹": 2,
+            "Premier League Russe 🇷🇺": 2,
+            "Super League Suisse 🇨🇭": 2,
+            "Süper Lig Turque 🇹🇷": 2,
+            "Championship Anglais 🏴󠁧󠁢󠁥󠁮󠁧󠁿": 2,
+            "Ligue 2 Française 🇫🇷": 2,
+            "Serie B Italienne 🇮🇹": 2,
+            "Segunda División Espagnole 🇪🇸": 2,
+            "2. Bundesliga Allemande 🇩🇪": 2,
+            
+            # Compétitions internationales
+            "Coupe du Monde FIFA 🌍": 1,
+            "Ligue des Nations UEFA 🇪🇺": 1,
+            "Championnat d'Europe UEFA 🇪🇺": 1,
+            "Copa America 🌎": 1,
+            "Coupe d'Afrique des Nations 🌍": 1,
+            
+            # Autres championnats internationaux
+            "MLS 🇺🇸": 3,
+            "Liga MX 🇲🇽": 3,
+            "J-League 🇯🇵": 3,
+            "K-League 🇰🇷": 3,
+            "A-League 🇦🇺": 3,
+            "Chinese Super League 🇨🇳": 3,
+            "Brasileirão 🇧🇷": 3,
+            "Argentine Primera División 🇦🇷": 3
+        }
+        
+        # Fusionner les dictionnaires pour avoir toutes les compétitions
+        self.all_competitions = {**self.top5_leagues, **self.top_cups, **self.other_leagues}
+        
+        # Liste de mots-clés pour identifier les matchs de coupe
+        self.cup_keywords = [
+            "cup", "coupe", "copa", "pokal", "coppa", "trophy", "trophée", 
+            "supercoupe", "supercup", "champions league", "europa", "conférence",
+            "final", "finale", "semi-final", "quarter-final"
+        ]
         
         print("Bot initialisé!")
 
@@ -142,6 +170,21 @@ class BettingBot:
             "UEFA Europa League": "Ligue Europa de l'UEFA 🇪🇺",
             "Conference League": "Ligue Conférence de l'UEFA 🇪🇺",
             "UEFA Europa Conference League": "Ligue Conférence de l'UEFA 🇪🇺",
+            "UEFA Super Cup": "Supercoupe de l'UEFA 🇪🇺",
+            
+            # Coupes nationales
+            "FA Cup": "FA Cup 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+            "EFL Cup": "EFL Cup 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+            "Carabao Cup": "EFL Cup 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+            "Copa del Rey": "Copa del Rey 🇪🇸",
+            "Supercopa de España": "Supercoupe d'Espagne 🇪🇸",
+            "DFB-Pokal": "DFB-Pokal 🇩🇪",
+            "DFL-Supercup": "Supercoupe d'Allemagne 🇩🇪",
+            "Coppa Italia": "Coppa Italia 🇮🇹",
+            "Supercoppa Italiana": "Supercoupe d'Italie 🇮🇹",
+            "Coupe de France": "Coupe de France 🇫🇷",
+            "Coupe de la Ligue": "Coupe de la Ligue Française 🇫🇷",
+            "Trophée des Champions": "Trophée des Champions 🇫🇷",
             
             # Championnats européens secondaires
             "Belgian Pro League": "Championnat de Belgique de Football 🇧🇪",
@@ -180,9 +223,23 @@ class BettingBot:
         }
         return league_mappings.get(competition, competition)
 
+    def _is_cup_match(self, competition: str) -> bool:
+        """Détermine si un match est une compétition de coupe"""
+        # Vérifier si c'est une coupe connue directement
+        if competition in self.top_cups:
+            return True
+        
+        # Vérifier si le nom contient un mot-clé de coupe
+        competition_lower = competition.lower()
+        for keyword in self.cup_keywords:
+            if keyword.lower() in competition_lower:
+                return True
+        
+        return False
+
     @retry(tries=3, delay=5, backoff=2, logger=logger)
     def fetch_matches(self) -> List[Match]:
-        """Récupère les matchs à venir en priorisant les 5 grands championnats"""
+        """Récupère les matchs à venir en priorisant les 5 grands championnats et leurs coupes"""
         print("\n1️⃣ RÉCUPÉRATION DES MATCHS...")
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
         params = {
@@ -208,6 +265,7 @@ class BettingBot:
                     commence_time = datetime.fromisoformat(match_data["commence_time"].replace('Z', '+00:00'))
                     sport_title = match_data.get("sport_title", "Unknown")
                     competition = self._get_league_name(sport_title)
+                    is_cup = self._is_cup_match(competition)
                     
                     # Récupérer les cotes des bookmakers
                     bookmaker_odds = {}
@@ -226,13 +284,25 @@ class BettingBot:
                     
                     # Filtrer sur les prochaines 48h
                     if 0 < (commence_time - current_time).total_seconds() <= 172800:  # 48 heures
-                        # Déterminer la priorité selon la compétition
+                        # Déterminer la priorité selon la compétition et si c'est une coupe
                         if competition in self.top5_leagues:
                             priority = 1  # Top 5 championnats
-                        elif competition in self.all_leagues:
-                            priority = self.all_leagues[competition]
+                        elif is_cup and competition in self.top_cups:
+                            priority = 1  # Coupes majeures
+                        elif competition in self.all_competitions:
+                            priority = self.all_competitions[competition]
                         else:
                             priority = 5  # Priorité la plus basse
+                        
+                        # Ajuster la priorité pour les matchs de coupe des 5 grands championnats
+                        if is_cup and priority > 1:
+                            # Vérifier si c'est une coupe d'un des 5 grands pays
+                            country_keywords = ["angla", "españ", "españo", "espan", "franc", "italien", "itali", "german", "allemand", "deutsch"]
+                            competition_lower = competition.lower()
+                            for keyword in country_keywords:
+                                if keyword in competition_lower:
+                                    priority = max(1, priority - 1)  # Augmenter la priorité
+                                    break
                         
                         match = Match(
                             home_team=match_data["home_team"],
@@ -241,7 +311,8 @@ class BettingBot:
                             region=competition.split()[-1] if " " in competition else "⚽",
                             commence_time=commence_time,
                             priority=priority,
-                            bookmaker_odds=bookmaker_odds
+                            bookmaker_odds=bookmaker_odds,
+                            is_cup_match=is_cup
                         )
                         all_matches.append(match)
                 except Exception as e:
@@ -252,30 +323,40 @@ class BettingBot:
                 print("❌ Aucun match trouvé pour les prochaines 48 heures")
                 return []
 
-            # Compte des matchs par priorité pour le log
-            priority_counts = {}
-            for match in all_matches:
-                priority_counts[match.priority] = priority_counts.get(match.priority, 0) + 1
-            
-            print("\n📊 Répartition des matchs par priorité:")
-            for priority, count in sorted(priority_counts.items()):
-                priority_name = "Top 5 Championnats" if priority == 1 else f"Priorité {priority}"
-                print(f"  - {priority_name}: {count} matchs")
-            
             # Trier les matchs par priorité (les plus importantes d'abord)
             all_matches.sort(key=lambda x: (x.priority, x.commence_time))
             
-            # Vérifier si nous avons suffisamment de matchs des 5 grands championnats
-            top5_matches = [m for m in all_matches if m.priority == 1]
-            print(f"\n✅ {len(top5_matches)} matchs des 5 grands championnats trouvés")
+            # Compte des matchs par priorité et type pour le log
+            priority_counts = {}
+            cup_counts = 0
+            league_counts = 0
             
-            # Si nous avons suffisamment de matchs des Top 5, ne prendre que ceux-là
-            if len(top5_matches) >= self.config.MIN_PREDICTIONS:
-                selected_matches = top5_matches[:self.config.MAX_MATCHES]
-                print(f"✅ Sélection de {len(selected_matches)} matchs uniquement des 5 grands championnats")
+            for match in all_matches:
+                priority_counts[match.priority] = priority_counts.get(match.priority, 0) + 1
+                if match.is_cup_match:
+                    cup_counts += 1
+                else:
+                    league_counts += 1
+            
+            print("\n📊 Répartition des matchs par priorité:")
+            for priority, count in sorted(priority_counts.items()):
+                priority_name = "Priorité Maximale" if priority == 1 else f"Priorité {priority}"
+                print(f"  - {priority_name}: {count} matchs")
+            
+            print(f"  - Matchs de championnat: {league_counts}")
+            print(f"  - Matchs de coupe: {cup_counts}")
+            
+            # Vérifier si nous avons suffisamment de matchs de priorité 1
+            priority1_matches = [m for m in all_matches if m.priority == 1]
+            print(f"\n✅ {len(priority1_matches)} matchs de priorité maximale trouvés")
+            
+            # Si nous avons suffisamment de matchs prioritaires, ne prendre que ceux-là
+            if len(priority1_matches) >= self.config.MIN_PREDICTIONS:
+                selected_matches = priority1_matches[:self.config.MAX_MATCHES]
+                print(f"✅ Sélection de {len(selected_matches)} matchs prioritaires")
             else:
                 # Sinon, compléter avec d'autres matchs de priorité supérieure
-                selected_matches = top5_matches
+                selected_matches = priority1_matches
                 remaining_needed = self.config.MIN_PREDICTIONS - len(selected_matches)
                 
                 # Ajouter des matchs de priorité 2 si nécessaire
@@ -303,6 +384,9 @@ class BettingBot:
             # S'assurer de ne pas dépasser MAX_MATCHES
             selected_matches = selected_matches[:self.config.MAX_MATCHES]
             
+            # Trier par heure de début
+            selected_matches.sort(key=lambda x: x.commence_time)
+            
             print(f"\n✅ {len(selected_matches)} matchs candidats sélectionnés:")
             for i, match in enumerate(selected_matches, 1):
                 odds_info = ""
@@ -312,7 +396,8 @@ class BettingBot:
                     away_odds = match.bookmaker_odds.get("away", "N/A")
                     odds_info = f" [Cotes: {home_odds}-{draw_odds}-{away_odds}]"
                 
-                print(f"  {i}. {match.home_team} vs {match.away_team} ({match.competition}, Priorité: {match.priority}){odds_info}")
+                match_type = "🏆 COUPE" if match.is_cup_match else "🏅 CHAMP."
+                print(f"  {i}. {match_type} {match.home_team} vs {match.away_team} ({match.competition}, Priorité: {match.priority}){odds_info}")
                 
             return selected_matches
 
@@ -390,6 +475,23 @@ IMPORTANT: Format sous forme de liste, uniquement les données brutes factuelles
                 print("✅ Données de confrontations directes collectées")
             else:
                 print("⚠️ Pas de données de confrontations directes disponibles")
+                
+                # Pour les matchs de coupe, tenter d'obtenir des données spécifiques de coupe
+                if match.is_cup_match:
+                    cup_h2h_prompt = f"""En tant que collecteur de données sportives factuel, recherche spécifiquement les confrontations entre {match.home_team} et {match.away_team} en compétitions de coupe ou matchs à élimination directe:
+
+1. HISTORIQUE DES CONFRONTATIONS EN COUPE:
+   - Rencontres en coupe/matchs à enjeu direct avec dates et scores
+   - Performance de chaque équipe dans ce type de compétition
+   - Statistiques spécifiques aux matchs à élimination directe
+   - Parcours des deux équipes dans la compétition actuelle ({match.competition})
+
+Format: données factuelles uniquement."""
+
+                    cup_h2h_response = self._get_perplexity_response(cup_h2h_prompt)
+                    if cup_h2h_response:
+                        match.stats["confrontations_directes"] = cup_h2h_response
+                        print("✅ Données de confrontations en coupe collectées")
             
             # 3. Statistiques détaillées
             stats_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement ces statistiques précises et actuelles pour {match.home_team} et {match.away_team} dans la compétition {match.competition}:
@@ -443,7 +545,25 @@ IMPORTANT: Format liste, données factuelles uniquement, pas d'analyse d'impact.
                 print("⚠️ Pas de données d'absences disponibles")
             
             # 5. Contexte du match
-            contexte_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement ces informations sur le contexte du match {match.home_team} vs {match.away_team} dans la compétition {match.competition}:
+            context_prompt = ""
+            if match.is_cup_match:
+                context_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement ces informations sur le contexte du match de coupe {match.home_team} vs {match.away_team} dans la compétition {match.competition}:
+
+1. CONTEXTE DE LA COUPE:
+   - Phase actuelle de la compétition (1/8, quart, demi-finale, etc.)
+   - Règles spécifiques (match aller-retour, élimination directe, etc.)
+   - Parcours des deux équipes jusqu'à présent dans cette compétition
+   - Historique des équipes dans cette compétition (palmarès)
+
+2. ENJEU DU MATCH:
+   - Importance pour chaque équipe (qualification, trophée, etc.)
+   - Motivation et priorité donnée à cette compétition
+   - Matchs à venir dans d'autres compétitions (gestion possible)
+   - Conditions particulières (stade, ambiance, météo)
+
+IMPORTANT: Données factuelles uniquement, pas d'analyse ni de pronostic."""
+            else:
+                context_prompt = f"""En tant que collecteur de données sportives factuel, fournir exclusivement ces informations sur le contexte du match {match.home_team} vs {match.away_team} dans la compétition {match.competition}:
 
 1. CONTEXTE SPORTIF:
    - Position actuelle au classement des deux équipes avec points exacts
@@ -458,7 +578,7 @@ IMPORTANT: Format liste, données factuelles uniquement, pas d'analyse d'impact.
 
 IMPORTANT: Données factuelles uniquement, pas d'analyse ni de pronostic."""
 
-            contexte_response = self._get_perplexity_response(contexte_prompt)
+            contexte_response = self._get_perplexity_response(context_prompt)
             if contexte_response:
                 match.stats["contexte_match"] = contexte_response
                 print("✅ Données sur le contexte du match collectées")
@@ -506,7 +626,7 @@ IMPORTANT: Données factuelles uniquement, pas d'analyse ni de pronostic."""
 
     @retry(tries=2, delay=3, backoff=2, logger=logger)
     def analyze_with_claude(self, match: Match) -> Optional[Prediction]:
-        """Analyse complète du match avec Claude pour obtenir les scores probables et la prédiction"""
+        """Analyse complète du match avec Claude pour obtenir les scores probables et la prédiction optimale"""
         print(f"\n3️⃣ ANALYSE AVEC CLAUDE POUR {match.home_team} vs {match.away_team}")
         
         if not match.stats.get("forme_recente") or not match.stats.get("statistiques_detaillees"):
@@ -550,7 +670,6 @@ où X, Y, Z et W sont des nombres entiers (comme 1-0, 2-1, 1-1, etc.)."""
                 print("❌ Première tentative pour les scores échouée. Réponse:")
                 print(scores_response)
                 
-                # Deuxième tentative avec prompt ultra-simple
                 # Deuxième tentative avec prompt ultra-simple
                 retry_prompt = f"""Donne-moi exactement deux lignes au format suivant pour prédire le score de {match.home_team} vs {match.away_team}:
 
@@ -599,30 +718,61 @@ SCORE_2: 2-1
             match.predicted_score1 = score1
             match.predicted_score2 = score2
             
+            # Extraire les scores pour analyse ultérieure
+            home_goals1, away_goals1 = map(int, score1.split('-'))
+            home_goals2, away_goals2 = map(int, score2.split('-'))
+            total_goals1 = home_goals1 + away_goals1
+            total_goals2 = home_goals2 + away_goals2
+            
             # ÉTAPE 2: Analyser et prédire le pari le plus sûr
-            # Maintenant avec les données statistiques complètes
-            analysis_prompt = f"""Analyse ces données pour prédire le résultat le plus sûr pour le match {match.home_team} vs {match.away_team}.
+            # Avec règles améliorées pour des prédictions plus fiables
+            analysis_prompt = f"""Analyse ces données pour déterminer la prédiction LA PLUS SÛRE pour le match {match.home_team} vs {match.away_team}.
 
-DONNÉES:
+INFORMATIONS CLÉS:
 - Scores probables: {score1} et {score2}
-- Compétition: {match.competition}
+- Compétition: {match.competition} ({'Match de coupe' if match.is_cup_match else 'Match de championnat'})
+- Buts totaux prévus: {total_goals1} et {total_goals2}
+
+DONNÉES STATISTIQUES COMPLÈTES:
 {data_content}
 
 OPTIONS DISPONIBLES:
 {', '.join(self.available_predictions)}
 
-RÈGLES:
-- Base ta prédiction uniquement sur les données statistiques
-- Choisis une seule option parmi celles disponibles
-- Ta confiance doit être d'au moins 85%
+RÈGLES STRICTES DE SÉLECTION (TRÈS IMPORTANT):
+
+1. PRIORISATION DES PRÉDICTIONS:
+   - Priorité 1: Double chance (1X, X2) pour équipes favorites mais sans garantie
+   - Priorité 2: Prédictions sur le nombre de buts (+1.5, +2.5, -3.5 buts)
+   - Priorité 3: Résultat direct (1, 2) uniquement si confiance extrêmement élevée
+
+2. RÈGLES POUR LES BUTS:
+   - Pour "+1.5 buts": N'utiliser QUE si au moins 2 buts sont attendus dans CHAQUE score probable
+   - Pour "+2.5 buts": N'utiliser QUE si au moins 3 buts sont attendus en moyenne
+   - Pour "-3.5 buts": N'utiliser QUE si TOUS les scores prédits ont strictement moins de 4 buts
+
+3. RÈGLES POUR LES DOUBLES CHANCES:
+   - Pour "1X": L'équipe à domicile doit être légèrement favorite ou proche du nul
+   - Pour "X2": L'équipe extérieure doit être légèrement favorite ou proche du nul
+   - Ne JAMAIS utiliser "1X" si les deux scores favorisent l'équipe extérieure
+   - Ne JAMAIS utiliser "X2" si les deux scores favorisent l'équipe à domicile
+
+4. RÈGLES POUR LES VICTOIRES DIRECTES:
+   - Pour "1": L'équipe à domicile doit gagner dans les DEUX scores probables
+   - Pour "2": L'équipe extérieure doit gagner dans les DEUX scores probables
+   - Exiger une confiance d'au moins 90% pour toute prédiction de résultat direct
+
+5. COHÉRENCE AVEC LES SCORES:
+   - La prédiction DOIT être cohérente avec les deux scores probables
+   - En cas de scores contradictoires, privilégier les prédictions sur les buts
 
 RÉPONDS EXACTEMENT AVEC CE FORMAT:
 PRÉDICTION: [option choisie]
-CONFIANCE: [pourcentage]"""
+CONFIANCE: [pourcentage entre 85 et 100]"""
 
             prediction_message = self.claude_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                max_tokens=100,
+                max_tokens=150,
                 temperature=0.1,
                 messages=[{"role": "user", "content": analysis_prompt}]
             )
@@ -637,12 +787,32 @@ CONFIANCE: [pourcentage]"""
                 print("❌ Première tentative pour la prédiction échouée. Réponse:")
                 print(prediction_response)
                 
-                # Deuxième tentative avec prompt ultra-simple
+                # Deuxième tentative avec prompt ultra-simple et pré-analyse des scores
+                # Prédétermine la meilleure prédiction basée sur les scores
+                suggested_pred = ""
+                if home_goals1 > away_goals1 and home_goals2 > away_goals2:
+                    # L'équipe à domicile gagne dans les deux scores
+                    suggested_pred = "1X" if min(home_goals1 - away_goals1, home_goals2 - away_goals2) < 2 else "1"
+                elif away_goals1 > home_goals1 and away_goals2 > home_goals2:
+                    # L'équipe à l'extérieur gagne dans les deux scores
+                    suggested_pred = "X2" if min(away_goals1 - home_goals1, away_goals2 - home_goals2) < 2 else "2"
+                elif total_goals1 >= 3 or total_goals2 >= 3:
+                    # Beaucoup de buts attendus
+                    suggested_pred = "+2.5 buts"
+                elif total_goals1 >= 2 or total_goals2 >= 2:
+                    # Nombre modéré de buts
+                    suggested_pred = "+1.5 buts"
+                else:
+                    # Match serré avec peu de buts
+                    suggested_pred = "-3.5 buts"
+                
                 retry_prompt = f"""Choisis UNE SEULE prédiction parmi cette liste pour {match.home_team} vs {match.away_team}:
 {', '.join(self.available_predictions)}
 
+Basé sur les scores prédits {score1} et {score2}, la prédiction la plus sûre semble être {suggested_pred}.
+
 Réponds UNIQUEMENT avec ces deux lignes:
-PRÉDICTION: [ta prédiction]
+PRÉDICTION: [ta prédiction finale]
 CONFIANCE: [pourcentage entre 85 et 100]"""
 
                 retry_message = self.claude_client.messages.create(
@@ -658,11 +828,16 @@ CONFIANCE: [pourcentage entre 85 et 100]"""
                 
                 if not prediction_match or not confidence_match:
                     print("❌ Deuxième tentative pour la prédiction échouée")
-                    return None
-            
-            # Extraire et normaliser la prédiction
-            pred_text = prediction_match.group(1).strip()
-            confidence = min(100, max(85, int(confidence_match.group(1))))
+                    # Utiliser notre suggestion en dernier recours
+                    pred_text = suggested_pred
+                    confidence = 85
+                    print(f"⚠️ Utilisation de la prédiction de secours: {pred_text}")
+                else:
+                    pred_text = prediction_match.group(1).strip()
+                    confidence = min(100, max(85, int(confidence_match.group(1))))
+            else:
+                pred_text = prediction_match.group(1).strip()
+                confidence = min(100, max(85, int(confidence_match.group(1))))
             
             # Trouver la prédiction correspondante dans la liste disponible
             normalized_pred = None
@@ -682,7 +857,76 @@ CONFIANCE: [pourcentage entre 85 et 100]"""
                         break
                 
                 if not normalized_pred:
-                    return None
+                    # Dernier recours basé sur l'analyse des scores
+                    if home_goals1 > away_goals1 and home_goals2 > away_goals2:
+                        normalized_pred = "1X"
+                    elif away_goals1 > home_goals1 and away_goals2 > home_goals2:
+                        normalized_pred = "X2"
+                    elif total_goals1 >= 3 or total_goals2 >= 3:
+                        normalized_pred = "+2.5 buts"
+                    else:
+                        normalized_pred = "+1.5 buts"
+                    
+                    print(f"⚠️ Utilisation de prédiction par défaut basée sur les scores: {normalized_pred}")
+                    if not normalized_pred:
+                        return None
+            
+            # ÉTAPE 3: Vérification de cohérence entre les scores et la prédiction
+            # Réduire la confiance ou changer la prédiction si nécessaire
+            is_coherent = True
+            
+            # Vérifier si tous les scores prédits sont cohérents avec la prédiction
+            if normalized_pred == "1" and (home_goals1 <= away_goals1 or home_goals2 <= away_goals2):
+                is_coherent = False
+                print("⚠️ Incohérence: prédiction '1' mais l'équipe à domicile ne gagne pas dans tous les scores")
+            elif normalized_pred == "2" and (away_goals1 <= home_goals1 or away_goals2 <= home_goals2):
+                is_coherent = False
+                print("⚠️ Incohérence: prédiction '2' mais l'équipe extérieure ne gagne pas dans tous les scores")
+            elif normalized_pred == "1X" and (away_goals1 > home_goals1 and away_goals2 > home_goals2):
+                is_coherent = False
+                print("⚠️ Incohérence: prédiction '1X' mais l'équipe extérieure est favorite dans tous les scores")
+            elif normalized_pred == "X2" and (home_goals1 > away_goals1 and home_goals2 > away_goals2):
+                is_coherent = False
+                print("⚠️ Incohérence: prédiction 'X2' mais l'équipe à domicile est favorite dans tous les scores")
+            elif normalized_pred == "+1.5 buts" and (total_goals1 < 2 and total_goals2 < 2):
+                is_coherent = False
+                print("⚠️ Incohérence: prédiction '+1.5 buts' mais moins de 2 buts sont attendus")
+            elif normalized_pred == "+2.5 buts" and (total_goals1 < 3 and total_goals2 < 3):
+                is_coherent = False
+                print("⚠️ Incohérence: prédiction '+2.5 buts' mais moins de 3 buts sont attendus")
+            elif normalized_pred == "-3.5 buts" and (total_goals1 >= 4 or total_goals2 >= 4):
+                is_coherent = False
+                print("⚠️ Incohérence: prédiction '-3.5 buts' mais 4 buts ou plus sont attendus")
+            
+            # Ajuster la prédiction si nécessaire
+            if not is_coherent:
+                print("🔄 Ajustement de la prédiction pour garantir la cohérence avec les scores...")
+                
+                # Proposer une prédiction alternative cohérente
+                if normalized_pred in ["1", "1X"] and (away_goals1 > home_goals1 or away_goals2 > home_goals2):
+                    # Les scores ne favorisent pas clairement l'équipe à domicile
+                    if total_goals1 >= 3 or total_goals2 >= 3:
+                        normalized_pred = "+2.5 buts"
+                    else:
+                        normalized_pred = "+1.5 buts"
+                elif normalized_pred in ["2", "X2"] and (home_goals1 > away_goals1 or home_goals2 > away_goals2):
+                    # Les scores ne favorisent pas clairement l'équipe extérieure
+                    if total_goals1 >= 3 or total_goals2 >= 3:
+                        normalized_pred = "+2.5 buts"
+                    else:
+                        normalized_pred = "+1.5 buts"
+                elif normalized_pred == "+2.5 buts" and (total_goals1 < 3 and total_goals2 < 3):
+                    normalized_pred = "+1.5 buts"
+                elif normalized_pred == "+1.5 buts" and (total_goals1 < 2 and total_goals2 < 2):
+                    if home_goals1 == away_goals1 or home_goals2 == away_goals2:  # Match nul probable
+                        normalized_pred = "12"  # Double chance "Pas de match nul"
+                    else:
+                        normalized_pred = "-3.5 buts"
+                
+                print(f"✅ Nouvelle prédiction après ajustement: {normalized_pred}")
+                
+                # Réduire légèrement la confiance après ajustement
+                confidence = max(85, confidence - 5)
             
             # Extraire les cotes pour la prédiction
             home_odds = match.bookmaker_odds.get("home", 0.0)
@@ -767,7 +1011,7 @@ CONFIANCE: [pourcentage entre 85 et 100]"""
         try:
             print(f"\n=== 🤖 AL VE AI BOT - GÉNÉRATION DES PRÉDICTIONS ({datetime.now().strftime('%H:%M')}) ===")
             
-            # Étape 1: Récupérer les matchs en privilégiant les 5 grands championnats
+            # Étape 1: Récupérer les matchs en privilégiant les 5 grands championnats et leurs coupes
             all_matches = self.fetch_matches()
             if not all_matches:
                 print("❌ Aucun match trouvé pour aujourd'hui")
@@ -784,7 +1028,8 @@ CONFIANCE: [pourcentage entre 85 et 100]"""
                 if len(predictions) >= self.config.MAX_MATCHES:
                     break
                 
-                print(f"\n📊 TRAITEMENT DU MATCH {processed_count}/{len(all_matches)}: {match.home_team} vs {match.away_team}")
+                match_type = "🏆 COUPE" if match.is_cup_match else "🏅 CHAMPIONNAT"
+                print(f"\n📊 TRAITEMENT DU MATCH {processed_count}/{len(all_matches)}: {match_type} {match.home_team} vs {match.away_team}")
                 
                 # Collecter les données brutes via Perplexity
                 data_collected = self.collect_match_data(match)
